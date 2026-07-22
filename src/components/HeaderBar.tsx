@@ -1,5 +1,5 @@
 import React from 'react';
-import { Volume2, VolumeX, Pause, Play, Trophy, Key, Timer, Footprints, Settings, ShoppingBag } from 'lucide-react';
+import { Volume2, VolumeX, Pause, Play, Trophy, Key, Timer, Footprints, Settings, ShoppingBag, ArrowLeft } from 'lucide-react';
 import { Difficulty, GameMode } from '../types/maze';
 import { MazeMasterLogo } from './MazeMasterLogo';
 
@@ -18,6 +18,7 @@ interface HeaderBarProps {
   onOpenSettings: () => void;
   onOpenShop?: () => void;
   onOpenAchievements?: () => void;
+  onBackToMenu?: () => void;
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
@@ -35,6 +36,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenSettings,
   onOpenShop,
   onOpenAchievements,
+  onBackToMenu,
 }) => {
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -48,6 +50,16 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     <header className="w-full max-w-5xl bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-xl p-3 sm:p-4 shadow-2xl flex flex-wrap items-center justify-between gap-3 text-zinc-100">
       {/* Title & Mode */}
       <div className="flex items-center gap-3">
+        {onBackToMenu && (
+          <button
+            onClick={onBackToMenu}
+            className="p-2 sm:p-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/40 font-mono text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-md active:scale-95 transition-all"
+            title="Back to Main Menu"
+          >
+            <ArrowLeft className="w-4 h-4 stroke-[2.5]" />
+            <span className="hidden xs:inline">Menu</span>
+          </button>
+        )}
         <MazeMasterLogo size="sm" />
         <div>
           <h1 className="text-xl sm:text-2xl font-serif font-bold tracking-widest text-amber-500 uppercase">

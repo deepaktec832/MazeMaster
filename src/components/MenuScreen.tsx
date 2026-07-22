@@ -124,15 +124,15 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
           <div>
             <div className="flex items-center justify-center sm:justify-start gap-2 text-xs font-mono font-bold text-amber-400 uppercase tracking-widest">
               <span>Featured Saga Mode</span>
-              <span className="px-2 py-0.5 rounded-full bg-amber-500 text-zinc-950 text-[10px]">
-                50 STAGES
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-extrabold animate-pulse">
+                1000 STAGES
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-serif font-bold text-zinc-100 uppercase mt-0.5">
               Campaign Labyrinth Saga
             </h2>
             <p className="text-xs text-zinc-400 max-w-md mt-1">
-              Traverse 5 Mythic Realms from Obsidian Caverns to Celestial Vaults. Earn 3-star ratings!
+              Traverse 100 Mythic Realms from Level 1 to Level 1000! Earn 3-star ratings!
             </p>
           </div>
         </div>

@@ -398,7 +398,7 @@ export const MazeBoard: React.FC<MazeBoardProps> = ({
       {/* Touch Swipe Indicator Hint */}
       <div className="mt-1 text-[10px] font-mono text-zinc-400 flex items-center gap-1">
         <Sparkles className="w-3 h-3 text-amber-400" />
-        <span>Swipe screen, drag joystick, or tap tiles to move</span>
+        <span>Swipe screen or tap tiles to move player</span>
       </div>
     </div>
   );

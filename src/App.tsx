@@ -58,8 +58,8 @@ export default function App() {
   const [is3DView, setIs3DView] = useState<boolean>(true);
   const [currentLevelIndex, setCurrentLevelIndex] = useState<number | null>(null);
 
-  // Mobile Shell Device View Mode
-  const [isMobileShellActive, setIsMobileShellActive] = useState<boolean>(false);
+  // Mobile Shell Device View Mode (default true for authentic mobile game app look)
+  const [isMobileShellActive, setIsMobileShellActive] = useState<boolean>(true);
 
   // Completed Levels & Stars State for Campaign Saga
   const [completedLevels, setCompletedLevels] = useState<Record<number, { stars: number; bestTime: number }>>(() => {
@@ -160,6 +160,49 @@ export default function App() {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const monsterTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Swipe Back Gesture Handler (Swipe Right to go Back to Main Menu)
+  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      touchStartRef.current = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+        time: Date.now(),
+      };
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const touch = e.changedTouches[0];
+    const deltaX = touch.clientX - touchStartRef.current.x;
+    const deltaY = touch.clientY - touchStartRef.current.y;
+    const startX = touchStartRef.current.x;
+    const duration = Date.now() - touchStartRef.current.time;
+
+    // Swipe right gesture (from left edge or across screen)
+    if (
+      (startX < 120 || deltaX > 140) &&
+      deltaX > 80 &&
+      Math.abs(deltaY) < 70 &&
+      duration < 600
+    ) {
+      if (isShopOpen) setIsShopOpen(false);
+      else if (isAchievementsOpen) setIsAchievementsOpen(false);
+      else if (isCampaignOpen) setIsCampaignOpen(false);
+      else if (isDailyRewardOpen) setIsDailyRewardOpen(false);
+      else if (isLeaderboardOpen) setIsLeaderboardOpen(false);
+      else if (isSettingsOpen) setIsSettingsOpen(false);
+      else if (isAdModalOpen) setIsAdModalOpen(false);
+      else if (gameStatus !== 'menu') {
+        sound.playButtonClick();
+        setGameStatus('menu');
+      }
+    }
+    touchStartRef.current = null;
+  };
+
   // Persistence Helpers
   const saveStats = (newStats: PlayerStats) => {
     setStats(newStats);
@@ -207,11 +250,21 @@ export default function App() {
   const handleStartGame = useCallback(
     (selectedMode: GameMode, selectedDiff: Difficulty, levelIdx: number | null = null) => {
       sound.playButtonClick();
+
+      // Determine effective difficulty based on campaign level index (1..1000)
+      let effectiveDiff = selectedDiff;
+      if (levelIdx !== null) {
+        if (levelIdx <= 50) effectiveDiff = 'easy';
+        else if (levelIdx <= 200) effectiveDiff = 'medium';
+        else if (levelIdx <= 500) effectiveDiff = 'hard';
+        else effectiveDiff = 'extreme';
+      }
+
       setMode(selectedMode);
-      setDifficulty(selectedDiff);
+      setDifficulty(effectiveDiff);
       setCurrentLevelIndex(levelIdx);
 
-      const dims = getGridDimensions(selectedDiff);
+      const dims = getGridDimensions(effectiveDiff);
       setRows(dims.rows);
       setCols(dims.cols);
 
@@ -668,6 +721,8 @@ export default function App() {
       onToggleMobileShell={() => setIsMobileShellActive(!isMobileShellActive)}
     >
       <div
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
         className="min-h-screen w-full flex flex-col items-center justify-between p-3 sm:p-6 transition-colors duration-300 font-sans select-none overflow-x-hidden relative"
         style={{ backgroundColor: activeTheme.bgColor }}
       >
@@ -720,6 +775,10 @@ export default function App() {
               onOpenSettings={() => setIsSettingsOpen(true)}
               onOpenShop={() => setIsShopOpen(true)}
               onOpenAchievements={() => setIsAchievementsOpen(true)}
+              onBackToMenu={() => {
+                sound.playButtonClick();
+                setGameStatus('menu');
+              }}
             />
 
             {/* MAIN MAZE BOARD WITH 3D PERSPECTIVE */}
@@ -743,9 +802,19 @@ export default function App() {
                 onTileClick={(r, c) => {
                   if (Math.abs(r - playerPos.row) + Math.abs(c - playerPos.col) === 1) {
                     if (r < playerPos.row) handleMove('top');
-                    if (r > playerPos.row) handleMove('bottom');
-                    if (c < playerPos.col) handleMove('left');
-                    if (c > playerPos.col) handleMove('right');
+                    else if (r > playerPos.row) handleMove('bottom');
+                    else if (c < playerPos.col) handleMove('left');
+                    else if (c > playerPos.col) handleMove('right');
+                  } else {
+                    const dr = r - playerPos.row;
+                    const dc = c - playerPos.col;
+                    if (Math.abs(dr) >= Math.abs(dc)) {
+                      if (dr < 0) handleMove('top');
+                      else if (dr > 0) handleMove('bottom');
+                    } else {
+                      if (dc < 0) handleMove('left');
+                      else if (dc > 0) handleMove('right');
+                    }
                   }
                 }}
               />
