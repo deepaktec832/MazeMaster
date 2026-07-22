@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Play, Volume2, VolumeX, Sparkles, DollarSign, CheckCircle2 } from 'lucide-react';
+import { X, Volume2, VolumeX, Sparkles, CheckCircle2, ShieldCheck, Play } from 'lucide-react';
 import { sound } from '../utils/sound';
+import { showAdMobRewarded, ADMOB_TEST_UNITS } from '../utils/admobService';
 
 interface AdModalProps {
   rewardType: 'coins' | 'hint' | 'speed';
@@ -10,9 +11,22 @@ interface AdModalProps {
 
 export const AdModal: React.FC<AdModalProps> = ({ rewardType, onRewardGranted, onClose }) => {
   const [timeLeft, setTimeLeft] = useState(6);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying] = useState(true);
   const [isCompleted, setIsCompleted] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [isNativeAdMobTriggered, setIsNativeAdMobTriggered] = useState(false);
+
+  useEffect(() => {
+    // Attempt native Capacitor AdMob Rewarded Video
+    showAdMobRewarded(() => {
+      setIsCompleted(true);
+      sound.playWin();
+    }).then((success) => {
+      if (success) {
+        setIsNativeAdMobTriggered(true);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (!isPlaying || isCompleted) return;
@@ -41,29 +55,29 @@ export const AdModal: React.FC<AdModalProps> = ({ rewardType, onRewardGranted, o
 
   return (
     <div className="fixed inset-0 z-50 bg-zinc-950/90 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-      <div className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-sm p-5 shadow-2xl flex flex-col gap-4 relative overflow-hidden text-zinc-100">
-        {/* Header Bar */}
+      <div className="w-full max-w-lg bg-zinc-900 border border-amber-500/40 rounded-2xl p-5 shadow-2xl flex flex-col gap-4 relative overflow-hidden text-zinc-100">
+        {/* AdMob Plugin Header */}
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40 uppercase rounded-xs">
-              SPONSORED AD
+            <span className="px-2.5 py-0.5 text-[10px] font-mono font-bold bg-amber-500 text-zinc-950 uppercase rounded-md shadow-sm">
+              Google AdMob
             </span>
-            <span className="text-xs font-mono text-zinc-400">
-              {isCompleted ? 'Reward Ready!' : `Ad ends in ${timeLeft}s`}
+            <span className="text-xs font-mono text-amber-400 font-semibold">
+              {isCompleted ? 'Reward Ready!' : `Capacitor Rewarded Ad (${timeLeft}s)`}
             </span>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsMuted(!isMuted)}
-              className="p-1.5 rounded-sm bg-zinc-950 hover:bg-zinc-800 text-zinc-400 border border-zinc-800"
+              className="p-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 text-zinc-400 border border-zinc-800 transition"
             >
               {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-amber-400" />}
             </button>
             {isCompleted && (
               <button
                 onClick={onClose}
-                className="p-1.5 rounded-sm bg-zinc-950 hover:bg-zinc-800 text-zinc-400 border border-zinc-800"
+                className="p-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 text-zinc-400 border border-zinc-800 transition"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -71,28 +85,26 @@ export const AdModal: React.FC<AdModalProps> = ({ rewardType, onRewardGranted, o
           </div>
         </div>
 
-        {/* Video Screen Simulation */}
-        <div className="w-full aspect-video bg-zinc-950 rounded-sm border border-zinc-800 relative overflow-hidden flex flex-col items-center justify-center p-6 text-center shadow-inner">
-          {/* Animated 3D Grid Background */}
-          <div className="absolute inset-0 bg-[radial-gradient(#d97706_1px,transparent_1px)] [background-size:16px_16px] opacity-20 animate-pulse" />
+        {/* Video / AdMob Screen Container */}
+        <div className="w-full aspect-video bg-zinc-950 rounded-xl border border-zinc-800 relative overflow-hidden flex flex-col items-center justify-center p-6 text-center shadow-inner">
+          <div className="absolute inset-0 bg-[radial-gradient(#f59e0b_1px,transparent_1px)] [background-size:16px_16px] opacity-15 animate-pulse" />
 
           {!isCompleted ? (
             <div className="relative z-10 flex flex-col items-center gap-3">
               <div className="w-14 h-14 rounded-full border-2 border-amber-500/50 flex items-center justify-center bg-amber-500/10 animate-bounce">
-                <Sparkles className="w-7 h-7 text-amber-400" />
+                <Play className="w-7 h-7 text-amber-400 fill-amber-400 translate-x-0.5" />
               </div>
               <div>
                 <h3 className="text-lg font-serif uppercase tracking-wider text-amber-300">
-                  Obsidian Realm Odyssey
+                  Google AdMob Rewarded Video
                 </h3>
                 <p className="text-xs text-zinc-400 max-w-xs mt-1 font-sans">
-                  Unlock mythical skin artifacts, speed boosts, and infinite labyrinth maps in MazeMaster 3D!
+                  Powered by @capacitor-community/admob plugin. Watch to unlock free rewards!
                 </p>
               </div>
 
-              {/* Countdown overlay */}
-              <div className="mt-2 text-xs font-mono text-amber-400 bg-zinc-900/90 px-3 py-1 rounded-sm border border-zinc-800">
-                Playing Sponsored Commercial...
+              <div className="mt-1 px-3 py-1 bg-zinc-900/90 rounded-lg border border-amber-500/30 text-[10px] font-mono text-zinc-400">
+                Unit ID: <span className="text-amber-400 font-bold">{ADMOB_TEST_UNITS.REWARDED}</span>
               </div>
             </div>
           ) : (
@@ -101,7 +113,7 @@ export const AdModal: React.FC<AdModalProps> = ({ rewardType, onRewardGranted, o
                 <CheckCircle2 className="w-8 h-8 -rotate-45" />
               </div>
               <h3 className="text-xl font-serif uppercase tracking-widest text-amber-400">
-                Ad Complete!
+                Rewarded Ad Complete!
               </h3>
               <p className="text-xs text-zinc-300 font-mono">
                 {rewardType === 'coins' ? 'Claim +150 Soul Fragments!' : 'Claim Free Power-up!'}
@@ -109,7 +121,7 @@ export const AdModal: React.FC<AdModalProps> = ({ rewardType, onRewardGranted, o
             </div>
           )}
 
-          {/* Video Progress Bar */}
+          {/* Progress Bar */}
           <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800">
             <div
               className="h-full bg-amber-500 transition-all duration-300 shadow-[0_0_8px_rgba(245,158,11,0.8)]"
@@ -118,32 +130,34 @@ export const AdModal: React.FC<AdModalProps> = ({ rewardType, onRewardGranted, o
           </div>
         </div>
 
-        {/* Ad Monetization & Creator Revenue Note */}
-        <div className="flex items-center justify-between text-[11px] font-mono text-zinc-500 bg-zinc-950 p-2.5 rounded-sm border border-zinc-800">
-          <div className="flex items-center gap-1 text-emerald-400">
-            <DollarSign className="w-3.5 h-3.5" />
-            <span>Developer Ad Impression Value: +$0.05 USD</span>
+        {/* Plugin Status Badge */}
+        <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400 bg-zinc-950 p-2.5 rounded-xl border border-zinc-800">
+          <div className="flex items-center gap-1.5 text-emerald-400">
+            <ShieldCheck className="w-4 h-4" />
+            <span>Plugin: @capacitor-community/admob v7.0</span>
           </div>
-          <span className="text-zinc-600">Simulated Ad Engine v2.0</span>
+          <span className="text-zinc-500 font-semibold">
+            {isNativeAdMobTriggered ? 'Capacitor Native SDK' : 'Plugin Test Unit'}
+          </span>
         </div>
 
-        {/* Claim Action */}
+        {/* Claim Action Button */}
         <button
           onClick={handleClaimReward}
           disabled={!isCompleted}
-          className={`w-full py-3 text-xs font-mono font-bold uppercase tracking-widest rounded-sm transition-all flex items-center justify-center gap-2 ${
+          className={`w-full py-3.5 text-xs font-mono font-bold uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
             isCompleted
-              ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950 shadow-lg shadow-amber-500/20 active:scale-95'
+              ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950 shadow-lg shadow-amber-500/20 active:scale-95 cursor-pointer'
               : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
           }`}
         >
           {isCompleted ? (
             <>
               <Sparkles className="w-4 h-4" />
-              <span>Claim Reward Now</span>
+              <span>Claim Reward (+150 Fragments)</span>
             </>
           ) : (
-            <span>Please wait for ad to finish...</span>
+            <span>Watching Rewarded Video ({timeLeft}s)...</span>
           )}
         </button>
       </div>

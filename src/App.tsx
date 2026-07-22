@@ -16,6 +16,7 @@ import { generateMaze, getGridDimensions, findShortestPath } from './utils/mazeG
 import { THEMES } from './utils/themes';
 import { sound } from './utils/sound';
 import { SKINS, INITIAL_ACHIEVEMENTS } from './utils/shopAndAchievements';
+import { initAdMob } from './utils/admobService';
 import { HeaderBar } from './components/HeaderBar';
 import { MazeBoard } from './components/MazeBoard';
 import { Controls } from './components/Controls';
@@ -27,6 +28,7 @@ import { ShopModal } from './components/ShopModal';
 import { AchievementsModal } from './components/AchievementsModal';
 import { AdModal } from './components/AdModal';
 import { BannerAdBar } from './components/BannerAdBar';
+import { PaymentModal } from './components/PaymentModal';
 import { CampaignMapModal } from './components/CampaignMapModal';
 import { DailyRewardModal } from './components/DailyRewardModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
@@ -154,7 +156,13 @@ export default function App() {
   });
 
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
   const [isNewBestTime, setIsNewBestTime] = useState<boolean>(false);
+
+  // Initialize Capacitor AdMob plugin
+  useEffect(() => {
+    initAdMob();
+  }, []);
 
   // Timer Ref
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -644,13 +652,14 @@ export default function App() {
     }
   };
 
-  const handleBuyRemoveAds = (cost: number) => {
-    if (stats.totalCoins >= cost && !stats.hasRemoveAds) {
-      const nextCoins = stats.totalCoins - cost;
-      const nextStats = { ...stats, totalCoins: nextCoins, hasRemoveAds: true };
-      saveStats(nextStats);
-      sound.playPowerUp();
-    }
+  const handleBuyRemoveAds = () => {
+    setIsPaymentModalOpen(true);
+  };
+
+  const handlePaymentSuccess = () => {
+    const nextStats = { ...stats, hasRemoveAds: true };
+    saveStats(nextStats);
+    sound.playPowerUp();
   };
 
   // Rewarded Ad Grant
@@ -925,6 +934,13 @@ export default function App() {
             onClose={() => setIsAdModalOpen(false)}
           />
         )}
+
+        {/* IN-APP DIRECT PAYMENT CHECKOUT MODAL */}
+        <PaymentModal
+          isOpen={isPaymentModalOpen}
+          onSuccess={handlePaymentSuccess}
+          onClose={() => setIsPaymentModalOpen(false)}
+        />
 
         {/* SETTINGS MODAL */}
         {isSettingsOpen && (

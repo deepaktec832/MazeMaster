@@ -13,7 +13,7 @@ interface ShopModalProps {
   onBuySkin: (skinId: PlayerSkinId, cost: number) => void;
   onSelectSkin: (skinId: PlayerSkinId) => void;
   onBuyPowerUp: (type: 'speed' | 'ghost' | 'hint', cost: number) => void;
-  onBuyRemoveAds: (cost: number) => void;
+  onBuyRemoveAds: () => void;
   onWatchAdClick: () => void;
   onClose: () => void;
 }
@@ -320,22 +320,13 @@ export const ShopModal: React.FC<ShopModalProps> = ({
               ) : (
                 <button
                   onClick={() => {
-                    if (totalCoins >= 300) {
-                      onBuyRemoveAds(300);
-                      sound.playWin();
-                    } else {
-                      sound.playTrap();
-                    }
+                    sound.playButtonClick();
+                    onBuyRemoveAds();
                   }}
-                  disabled={totalCoins < 300}
-                  className={`w-full sm:w-auto px-6 py-3 font-mono text-xs uppercase font-bold tracking-widest rounded-sm transition-all active:scale-95 shrink-0 flex items-center justify-center gap-2 ${
-                    totalCoins >= 300
-                      ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950 shadow-lg shadow-amber-500/20'
-                      : 'bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700'
-                  }`}
+                  className="w-full sm:w-auto px-6 py-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-mono text-xs uppercase font-bold tracking-widest rounded-sm transition-all active:scale-95 shadow-lg shadow-amber-500/20 shrink-0 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Ban className="w-4 h-4" />
-                  <span>Remove Ads (✧ 300)</span>
+                  <span>Remove Ads ($1.99 USD)</span>
                 </button>
               )}
             </div>

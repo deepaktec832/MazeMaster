@@ -312,6 +312,45 @@ export const MazeBoard: React.FC<MazeBoardProps> = ({
     touchStartRef.current = null;
   };
 
+  // Touch Hover & Mouse Hover Movement Throttle Ref
+  const lastHoverMoveRef = useRef<number>(0);
+
+  const handleHoverMovement = (clientX: number, clientY: number) => {
+    if (!onTileClick || !canvasRef.current) return;
+    const now = Date.now();
+    if (now - lastHoverMoveRef.current < 110) return; // Smooth controlled throttle rate
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    const tileSize = rect.width / cols;
+    const targetCol = Math.floor(x / tileSize);
+    const targetRow = Math.floor(y / tileSize);
+
+    if (
+      targetRow >= 0 &&
+      targetRow < rows &&
+      targetCol >= 0 &&
+      targetCol < cols &&
+      (targetRow !== playerPos.row || targetCol !== playerPos.col)
+    ) {
+      onTileClick(targetRow, targetCol);
+      lastHoverMoveRef.current = now;
+    }
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    handleHoverMovement(e.clientX, e.clientY);
+  };
+
+  const handleCanvasTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length > 0) {
+      const touch = e.touches[0];
+      handleHoverMovement(touch.clientX, touch.clientY);
+    }
+  };
+
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!onTileClick || !canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
@@ -391,14 +430,16 @@ export const MazeBoard: React.FC<MazeBoardProps> = ({
         <canvas
           ref={canvasRef}
           onClick={handleCanvasClick}
+          onMouseMove={handleCanvasMouseMove}
+          onTouchMove={handleCanvasTouchMove}
           className="cursor-pointer rounded-xl shadow-2xl touch-none border border-zinc-800/80"
         />
       </div>
 
-      {/* Touch Swipe Indicator Hint */}
+      {/* Touch Hover / Tap Movement Indicator Hint */}
       <div className="mt-1 text-[10px] font-mono text-zinc-400 flex items-center gap-1">
         <Sparkles className="w-3 h-3 text-amber-400" />
-        <span>Swipe screen or tap tiles to move player</span>
+        <span>Hover touch / pointer over tiles or tap/swipe to move</span>
       </div>
     </div>
   );
