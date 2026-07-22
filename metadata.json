@@ -1,0 +1,8 @@
+{
+  "name": "MazeMaster",
+  "description": "A feature-rich 3D maze game featuring neat 3D isometric perspective graphics, multi-touch swipe \u0026 tap controls, shop with 3D player skins, achievements with claimable rewards, and rewarded video ads monetization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
