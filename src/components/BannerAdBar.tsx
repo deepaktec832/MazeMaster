@@ -8,8 +8,16 @@ interface BannerAdBarProps {
 
 export const BannerAdBar: React.FC<BannerAdBarProps> = ({ onWatchAdClick }) => {
   useEffect(() => {
-    showAdMobBanner();
+    let mounted = true;
+    const timer = setTimeout(() => {
+      if (mounted) {
+        showAdMobBanner();
+      }
+    }, 1000);
+
     return () => {
+      mounted = false;
+      clearTimeout(timer);
       hideAdMobBanner();
     };
   }, []);

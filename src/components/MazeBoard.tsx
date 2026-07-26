@@ -72,17 +72,18 @@ export const MazeBoard: React.FC<MazeBoardProps> = ({
 
     ctx.scale(dpr, dpr);
 
-    // Render background with subtle gradient
+    // Render background with sleek radial cyberpunk grid glow
     const bgGrad = ctx.createRadialGradient(
       canvasWidth / 2,
       canvasHeight / 2,
-      10,
+      20,
       canvasWidth / 2,
       canvasHeight / 2,
-      canvasWidth
+      Math.max(canvasWidth, canvasHeight)
     );
     bgGrad.addColorStop(0, theme.bgColor);
-    bgGrad.addColorStop(1, '#030712');
+    bgGrad.addColorStop(0.7, adjustColor(theme.bgColor, -10));
+    bgGrad.addColorStop(1, '#02040a');
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
@@ -107,28 +108,39 @@ export const MazeBoard: React.FC<MazeBoardProps> = ({
       }
     }
 
-    // Draw floor paths & grid
+    // Draw floor paths & 3D bevel grid tiles
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const x = c * tileSize;
         const y = r * tileSize;
 
         if (!visibleMatrix[r][c]) {
-          ctx.fillStyle = '#030712'; // Pitch black fog
+          ctx.fillStyle = '#02040a'; // Dark fog
           ctx.fillRect(x, y, tileSize, tileSize);
           continue;
         }
 
-        // 3D Floor Tile Gradient & Bevel
+        // Calculate distance from player for dynamic ambient light source illumination
+        const distToPlayer = Math.hypot(r - playerPos.row, c - playerPos.col);
+        const lightIntensity = Math.max(0, 1 - distToPlayer / 6.5);
+
+        // 3D Floor Tile Beveled Metallic Gradient
         const gradient = ctx.createLinearGradient(x, y, x + tileSize, y + tileSize);
-        gradient.addColorStop(0, theme.pathColor);
-        gradient.addColorStop(1, adjustColor(theme.pathColor, -15));
+        const baseTileColor = theme.pathColor;
+        gradient.addColorStop(0, adjustColor(baseTileColor, 12));
+        gradient.addColorStop(1, adjustColor(baseTileColor, -12));
         ctx.fillStyle = gradient;
         ctx.fillRect(x, y, tileSize, tileSize);
 
-        // Draw subtle grid lines
+        // Player Light Bloom Highlight on floor
+        if (lightIntensity > 0) {
+          ctx.fillStyle = `rgba(245, 158, 11, ${lightIntensity * 0.22})`;
+          ctx.fillRect(x, y, tileSize, tileSize);
+        }
+
+        // Draw metallic grid bevel stroke
         ctx.strokeStyle = theme.gridLineColor;
-        ctx.lineWidth = 0.5;
+        ctx.lineWidth = 0.75;
         ctx.strokeRect(x, y, tileSize, tileSize);
 
         const cell = grid[r][c];

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Volume2, VolumeX, Pause, Play, Trophy, Key, Timer, Footprints, Settings, ShoppingBag, ArrowLeft } from 'lucide-react';
+import { Volume2, VolumeX, Pause, Play, Trophy, Key, Timer, Footprints, Settings, ShoppingBag, ArrowLeft, Cloud, Zap, Sparkles } from 'lucide-react';
+import { User } from 'firebase/auth';
 import { Difficulty, GameMode } from '../types/maze';
 import { MazeMasterLogo } from './MazeMasterLogo';
 
@@ -13,12 +14,17 @@ interface HeaderBarProps {
   keysCount: number;
   isMuted: boolean;
   isPaused: boolean;
+  currentUser?: User | null;
   onToggleMute: () => void;
   onTogglePause: () => void;
   onOpenSettings: () => void;
   onOpenShop?: () => void;
   onOpenAchievements?: () => void;
+  onOpenGoogleAuth?: () => void;
+  onOpenPuzzles?: () => void;
   onBackToMenu?: () => void;
+  onSkipLevelWithAds?: () => void;
+  skipLevelAdCount?: number;
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
@@ -31,12 +37,17 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   keysCount,
   isMuted,
   isPaused,
+  currentUser,
   onToggleMute,
   onTogglePause,
   onOpenSettings,
   onOpenShop,
   onOpenAchievements,
+  onOpenGoogleAuth,
+  onOpenPuzzles,
   onBackToMenu,
+  onSkipLevelWithAds,
+  skipLevelAdCount = 0,
 }) => {
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -118,11 +129,56 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       </div>
 
       {/* Control Buttons */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        {onSkipLevelWithAds && (
+          <button
+            onClick={onSkipLevelWithAds}
+            className="p-2 sm:px-3 sm:py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-zinc-950 font-mono text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
+            title="Watch 2 ads to immediately skip hard level!"
+          >
+            <Sparkles className="w-4 h-4 fill-zinc-950" />
+            <span className="hidden sm:inline">
+              {skipLevelAdCount === 1 ? 'Skip Level (1/2 Ads)' : 'Skip Level (2 Ads)'}
+            </span>
+            <span className="sm:hidden font-extrabold">{skipLevelAdCount}/2</span>
+          </button>
+        )}
+
+        {onOpenGoogleAuth && (
+          <button
+            onClick={onOpenGoogleAuth}
+            className="p-2 sm:px-3 sm:py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-amber-400 border border-amber-500/30 font-mono text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-md active:scale-95 transition-all"
+            title="Google Account & Cloud Save"
+          >
+            {currentUser?.photoURL ? (
+              <img
+                src={currentUser.photoURL}
+                alt="Google avatar"
+                className="w-4 h-4 rounded-full border border-amber-400"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <Cloud className="w-4 h-4 text-amber-400" />
+            )}
+            <span className="hidden md:inline">{currentUser ? 'Cloud Active' : 'Google Sync'}</span>
+          </button>
+        )}
+
+        {onOpenPuzzles && (
+          <button
+            onClick={onOpenPuzzles}
+            className="p-2 sm:px-3 sm:py-2 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-500/40 font-mono text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-md active:scale-95 transition-all"
+            title="Logic Puzzle Mini-Games"
+          >
+            <Zap className="w-4 h-4 text-cyan-400" />
+            <span className="hidden md:inline">Puzzles</span>
+          </button>
+        )}
+
         {onOpenShop && (
           <button
             onClick={onOpenShop}
-            className="p-2.5 rounded-md bg-zinc-950 hover:bg-zinc-800 active:scale-95 text-amber-400 border border-zinc-800 transition-all duration-150 flex items-center gap-1 font-mono text-xs"
+            className="p-2 sm:px-3 sm:py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 active:scale-95 text-amber-400 border border-zinc-800 transition-all duration-150 flex items-center gap-1 font-mono text-xs"
             title="Open Vault Shop"
           >
             <ShoppingBag className="w-4 h-4 text-amber-500" />

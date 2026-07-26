@@ -2,11 +2,11 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.mazemaster.app',
-  appName: 'MazeMaster',
+  appName: 'Maze Master',
   webDir: 'dist',
   plugins: {
     AdMob: {
-      // Initialize AdMob configuration if needed
+      androidAppId: 'ca-app-pub-3813652223447083~6768881455',
     },
   },
 };

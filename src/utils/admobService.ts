@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import {
   AdMob,
   BannerAdSize,
@@ -12,30 +13,58 @@ export interface AdMobStatus {
 }
 
 let isAdMobInitialized = false;
+let initPromise: Promise<boolean> | null = null;
 
 /**
  * Initialize Google AdMob Capacitor Plugin
  */
 export async function initAdMob(): Promise<boolean> {
-  try {
-    await AdMob.initialize({
-      initializeForTesting: true,
-    });
-    isAdMobInitialized = true;
-    console.log('[AdMob Capacitor Plugin] Successfully initialized.');
-    return true;
-  } catch (error) {
-    console.warn('[AdMob Capacitor Plugin] Web mode or native bridge not active. Fallback enabled.', error);
-    isAdMobInitialized = false;
+  if (!Capacitor.isNativePlatform()) {
+    console.log('[AdMob Capacitor Plugin] Running in web browser; skipping native initialization.');
     return false;
   }
+
+  if (isAdMobInitialized) return true;
+
+  if (initPromise) return initPromise;
+
+  initPromise = (async () => {
+    try {
+      // Small delay to ensure Android WebView is fully attached to parent layout
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      await AdMob.initialize({
+        initializeForTesting: true,
+      });
+      isAdMobInitialized = true;
+      console.log('[AdMob Capacitor Plugin] Successfully initialized on native device.');
+      return true;
+    } catch (error) {
+      console.warn('[AdMob Capacitor Plugin] Native AdMob initialization error:', error);
+      isAdMobInitialized = false;
+      return false;
+    }
+  })();
+
+  return initPromise;
 }
 
 /**
  * Show AdMob Bottom Banner Ad (Test Unit ID: ca-app-pub-3940256099942544/6300978111)
  */
 export async function showAdMobBanner(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) {
+    return false;
+  }
+
   try {
+    // Ensure initialization complete before attempting to attach banner view
+    const initialized = await initAdMob();
+    if (!initialized) return false;
+
+    // Safety delay to guarantee ViewGroup parent is non-null
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
     await AdMob.showBanner({
       adId: 'ca-app-pub-3940256099942544/6300978111',
       adSize: BannerAdSize.BANNER,
@@ -45,7 +74,7 @@ export async function showAdMobBanner(): Promise<boolean> {
     });
     return true;
   } catch (error) {
-    console.warn('[AdMob Banner] Banner not supported natively in browser session:', error);
+    console.warn('[AdMob Banner] Banner not supported or view not attached:', error);
     return false;
   }
 }

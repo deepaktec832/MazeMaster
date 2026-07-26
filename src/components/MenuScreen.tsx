@@ -1,5 +1,6 @@
 import React from 'react';
-import { Play, Compass, Timer, EyeOff, Skull, Hammer, Trophy, ShoppingBag, Sparkles, MapPin, Gift, Smartphone, Crown, ShieldCheck } from 'lucide-react';
+import { Play, Compass, Timer, EyeOff, Skull, Hammer, Trophy, ShoppingBag, Sparkles, MapPin, Gift, Smartphone, Crown, ShieldCheck, Cloud, Zap } from 'lucide-react';
+import { User } from 'firebase/auth';
 import { Difficulty, GameMode, PlayerStats } from '../types/maze';
 import { MazeMasterLogo } from './MazeMasterLogo';
 import { sound } from '../utils/sound';
@@ -9,8 +10,11 @@ interface MenuScreenProps {
   onOpenCampaign: () => void;
   onOpenDailyReward: () => void;
   onOpenLeaderboard: () => void;
+  onOpenGoogleAuth: () => void;
+  onOpenPuzzles: () => void;
   onToggleMobileShell: () => void;
   isMobileShellActive: boolean;
+  currentUser?: User | null;
   onOpenEditor: () => void;
   onOpenSettings: () => void;
   onOpenShop: () => void;
@@ -26,8 +30,11 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   onOpenCampaign,
   onOpenDailyReward,
   onOpenLeaderboard,
+  onOpenGoogleAuth,
+  onOpenPuzzles,
   onToggleMobileShell,
   isMobileShellActive,
+  currentUser,
   onOpenEditor,
   onOpenSettings,
   onOpenShop,
@@ -94,23 +101,44 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
           <button
             onClick={() => {
               sound.playButtonClick();
+              onOpenShop();
+            }}
+            className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 border border-amber-400 rounded-full text-xs font-mono font-bold uppercase flex items-center gap-1.5 active:scale-95 transition-all shadow-md shadow-amber-500/20"
+            title="Open 3D Skins & Power-ups Shop"
+          >
+            <ShoppingBag className="w-4 h-4 fill-zinc-950" />
+            <span>Shop</span>
+          </button>
+
+          <button
+            onClick={() => {
+              sound.playButtonClick();
+              onOpenGoogleAuth();
+            }}
+            className="px-3.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-amber-400 border border-amber-500/40 rounded-full text-xs font-mono font-bold uppercase flex items-center gap-1.5 active:scale-95 transition-all shadow-md"
+          >
+            {currentUser?.photoURL ? (
+              <img
+                src={currentUser.photoURL}
+                alt="Google avatar"
+                className="w-4 h-4 rounded-full border border-amber-400"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <Cloud className="w-4 h-4 text-amber-400" />
+            )}
+            <span>{currentUser ? currentUser.displayName?.split(' ')[0] || 'Cloud Active' : 'Sign in with Google (+250 ✧)'}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              sound.playButtonClick();
               onOpenDailyReward();
             }}
             className="px-3.5 py-1.5 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 hover:from-amber-500/30 hover:to-yellow-500/30 text-amber-300 border border-amber-500/50 rounded-full text-xs font-mono font-bold uppercase flex items-center gap-1.5 active:scale-95 transition-all shadow-lg animate-pulse"
           >
             <Gift className="w-4 h-4 text-amber-400" />
             <span>Daily Wheel</span>
-          </button>
-
-          <button
-            onClick={() => {
-              sound.playButtonClick();
-              onWatchAdClick();
-            }}
-            className="px-3.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-amber-400 border border-zinc-800 rounded-full text-xs font-mono font-bold uppercase flex items-center gap-1.5 active:scale-95 transition-all shadow-md"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Bonus (+150)</span>
           </button>
         </div>
       </div>
@@ -210,6 +238,17 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
         <button
           onClick={() => {
             sound.playButtonClick();
+            onOpenPuzzles();
+          }}
+          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-zinc-950 font-mono text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-cyan-500/20 transition-all active:scale-95"
+        >
+          <Zap className="w-4 h-4 fill-zinc-950 text-zinc-950" />
+          <span>Brain Puzzles</span>
+        </button>
+
+        <button
+          onClick={() => {
+            sound.playButtonClick();
             onOpenShop();
           }}
           className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-mono text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-lg transition-all active:scale-95"
@@ -238,17 +277,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
         >
           <Crown className="w-4 h-4 text-amber-500" />
           <span>Badges</span>
-        </button>
-
-        <button
-          onClick={() => {
-            sound.playButtonClick();
-            onToggleMobileShell();
-          }}
-          className="px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-emerald-400 border border-zinc-800 hover:border-emerald-500/50 font-mono text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg transition-all active:scale-95"
-        >
-          <Smartphone className="w-4 h-4 text-emerald-400" />
-          <span>{isMobileShellActive ? 'Exit Phone' : 'Mobile Shell'}</span>
         </button>
 
         <button

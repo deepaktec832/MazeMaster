@@ -1,6 +1,6 @@
 {
-  "name": "MazeMaster",
-  "description": "A feature-rich 3D maze game featuring neat 3D isometric perspective graphics, multi-touch swipe \u0026 tap controls, shop with 3D player skins, achievements with claimable rewards, and rewarded video ads monetization.",
+  "name": "MazeMaster 3D FPS",
+  "description": "A high-octane 3D First-Person Shooter (FPS) horror survival maze game featuring WebGL graphics, gun weapons, flashlight battery management, stalker ghost AI, mobile touch joysticks, Google cloud save, and in-game shop.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

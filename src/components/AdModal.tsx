@@ -4,8 +4,8 @@ import { sound } from '../utils/sound';
 import { showAdMobRewarded, ADMOB_TEST_UNITS } from '../utils/admobService';
 
 interface AdModalProps {
-  rewardType: 'coins' | 'hint' | 'speed';
-  onRewardGranted: (rewardType: 'coins' | 'hint' | 'speed', coinsAmount?: number) => void;
+  rewardType: 'coins' | 'hint' | 'speed' | 'skip_level';
+  onRewardGranted: (rewardType: 'coins' | 'hint' | 'speed' | 'skip_level', coinsAmount?: number) => void;
   onClose: () => void;
 }
 
@@ -47,7 +47,7 @@ export const AdModal: React.FC<AdModalProps> = ({ rewardType, onRewardGranted, o
   }, [isPlaying, isCompleted]);
 
   const handleClaimReward = () => {
-    onRewardGranted(rewardType, rewardType === 'coins' ? 150 : 0);
+    onRewardGranted(rewardType, rewardType === 'coins' ? 500 : 0);
     onClose();
   };
 
@@ -116,7 +116,11 @@ export const AdModal: React.FC<AdModalProps> = ({ rewardType, onRewardGranted, o
                 Rewarded Ad Complete!
               </h3>
               <p className="text-xs text-zinc-300 font-mono">
-                {rewardType === 'coins' ? 'Claim +150 Soul Fragments!' : 'Claim Free Power-up!'}
+                {rewardType === 'coins'
+                  ? 'Claim +500 Soul Fragments Boost!'
+                  : rewardType === 'skip_level'
+                  ? 'Claim Level Skip Progress!'
+                  : 'Claim Free Power-up!'}
               </p>
             </div>
           )}
@@ -154,7 +158,13 @@ export const AdModal: React.FC<AdModalProps> = ({ rewardType, onRewardGranted, o
           {isCompleted ? (
             <>
               <Sparkles className="w-4 h-4" />
-              <span>Claim Reward (+150 Fragments)</span>
+              <span>
+                {rewardType === 'coins'
+                  ? 'Claim +500 Fragments'
+                  : rewardType === 'skip_level'
+                  ? 'Claim Level Skip Progress'
+                  : 'Claim Free Reward'}
+              </span>
             </>
           ) : (
             <span>Watching Rewarded Video ({timeLeft}s)...</span>

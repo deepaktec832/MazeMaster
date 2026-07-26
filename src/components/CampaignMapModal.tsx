@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Lock, Star, Play, Trophy, MapPin, ChevronLeft, ChevronRight, Zap, Target } from 'lucide-react';
+import { X, Lock, Star, Play, Trophy, MapPin, ChevronLeft, ChevronRight, Zap, Target, Sparkles } from 'lucide-react';
 import { Difficulty, GameMode } from '../types/maze';
 import { sound } from '../utils/sound';
 
@@ -8,6 +8,8 @@ interface CampaignMapModalProps {
   onClose: () => void;
   onSelectLevel: (levelIndex: number, mode: GameMode, difficulty: Difficulty) => void;
   completedLevels?: Record<number, { stars: number; bestTime: number }>;
+  onSkipLevelWithAds?: () => void;
+  skipLevelAdCount?: number;
 }
 
 // Base Realm Archetypes that loop across 100 Worlds (1000 Levels Total)
@@ -29,6 +31,8 @@ export const CampaignMapModal: React.FC<CampaignMapModalProps> = ({
   onClose,
   onSelectLevel,
   completedLevels = {},
+  onSkipLevelWithAds,
+  skipLevelAdCount = 0,
 }) => {
   const [selectedWorld, setSelectedWorld] = useState<number>(1);
   const [jumpInput, setJumpInput] = useState<string>('');
@@ -106,11 +110,29 @@ export const CampaignMapModal: React.FC<CampaignMapModalProps> = ({
 
         {/* Level Progress Banner & Jump Control */}
         <div className="my-3 p-3 rounded-xl bg-zinc-900/90 border border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
-          <div className="flex items-center gap-2">
-            <Trophy className="w-4 h-4 text-amber-400" />
-            <span className="text-zinc-300">
-              Current Progress: <strong className="text-amber-400">Stage #{unlockedMax}</strong> / 1000
-            </span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-amber-400" />
+              <span className="text-zinc-300">
+                Current Progress: <strong className="text-amber-400">Stage #{unlockedMax}</strong> / 1000
+              </span>
+            </div>
+
+            {onSkipLevelWithAds && (
+              <button
+                onClick={() => {
+                  sound.playButtonClick();
+                  onSkipLevelWithAds();
+                }}
+                className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-zinc-950 font-extrabold uppercase tracking-wider flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 transition cursor-pointer"
+                title="Watch 2 ads to skip current hard stage"
+              >
+                <Sparkles className="w-3.5 h-3.5 fill-zinc-950" />
+                <span>
+                  {skipLevelAdCount === 1 ? 'Skip Lvl (1/2 Ads)' : 'Skip Lvl (2 Ads)'}
+                </span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-2">

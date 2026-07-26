@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { X, ShoppingBag, Sparkles, Zap, Ghost, Lightbulb, Play, CheckCircle, Lock, ShieldCheck, Ban } from 'lucide-react';
-import { PlayerSkinId, PowerUpInventory, SkinConfig } from '../types/maze';
-import { SKINS } from '../utils/shopAndAchievements';
+import { X, ShoppingBag, Sparkles, Zap, Ghost, Lightbulb, Play, CheckCircle, Lock, ShieldCheck, Ban, Crosshair } from 'lucide-react';
+import { PlayerSkinId, PowerUpInventory, SkinConfig, WeaponId } from '../types/maze';
+import { SKINS, WEAPONS } from '../utils/shopAndAchievements';
 import { sound } from '../utils/sound';
 
 interface ShopModalProps {
@@ -31,7 +31,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
   onWatchAdClick,
   onClose,
 }) => {
-  const [activeTab, setActiveTab] = useState<'skins' | 'powerups' | 'coins'>('skins');
+  const [activeTab, setActiveTab] = useState<'weapons' | 'skins' | 'powerups' | 'coins'>('weapons');
 
   const handleSkinAction = (skin: SkinConfig) => {
     const isUnlocked = unlockedSkins.includes(skin.id);
@@ -72,6 +72,19 @@ export const ShopModal: React.FC<ShopModalProps> = ({
               <span>{totalCoins} Fragments</span>
             </div>
 
+            {/* Quick Watch Ad Coin Boost Button */}
+            <button
+              onClick={() => {
+                onWatchAdClick();
+                onClose();
+              }}
+              className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-zinc-950 font-mono font-bold text-xs uppercase rounded-sm shadow-md shadow-amber-500/20 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Watch short ad to get +500 coin boost!"
+            >
+              <Play className="w-3.5 h-3.5 fill-zinc-950" />
+              <span>+500 Ads Boost</span>
+            </button>
+
             <button
               onClick={onClose}
               className="p-2 rounded-sm bg-zinc-950 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 transition-all"
@@ -82,10 +95,21 @@ export const ShopModal: React.FC<ShopModalProps> = ({
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b border-zinc-800 pb-2">
+        <div className="flex items-center gap-2 border-b border-zinc-800 pb-2 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('weapons')}
+            className={`px-4 py-2 font-mono text-xs uppercase tracking-wider rounded-sm transition-all shrink-0 ${
+              activeTab === 'weapons'
+                ? 'bg-amber-500 text-zinc-950 font-bold shadow-md shadow-amber-500/20'
+                : 'bg-zinc-950 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+            }`}
+          >
+            3D Arsenal Guns
+          </button>
+
           <button
             onClick={() => setActiveTab('skins')}
-            className={`px-4 py-2 font-mono text-xs uppercase tracking-wider rounded-sm transition-all ${
+            className={`px-4 py-2 font-mono text-xs uppercase tracking-wider rounded-sm transition-all shrink-0 ${
               activeTab === 'skins'
                 ? 'bg-amber-500 text-zinc-950 font-bold shadow-md shadow-amber-500/20'
                 : 'bg-zinc-950 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
@@ -96,7 +120,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
 
           <button
             onClick={() => setActiveTab('powerups')}
-            className={`px-4 py-2 font-mono text-xs uppercase tracking-wider rounded-sm transition-all ${
+            className={`px-4 py-2 font-mono text-xs uppercase tracking-wider rounded-sm transition-all shrink-0 ${
               activeTab === 'powerups'
                 ? 'bg-amber-500 text-zinc-950 font-bold shadow-md shadow-amber-500/20'
                 : 'bg-zinc-950 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
@@ -107,7 +131,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
 
           <button
             onClick={() => setActiveTab('coins')}
-            className={`px-4 py-2 font-mono text-xs uppercase tracking-wider rounded-sm transition-all ${
+            className={`px-4 py-2 font-mono text-xs uppercase tracking-wider rounded-sm transition-all shrink-0 ${
               activeTab === 'coins'
                 ? 'bg-amber-500 text-zinc-950 font-bold shadow-md shadow-amber-500/20'
                 : 'bg-zinc-950 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
@@ -116,6 +140,55 @@ export const ShopModal: React.FC<ShopModalProps> = ({
             Earn Coins / Ads
           </button>
         </div>
+
+        {/* Tab 0: 3D Weapons Arsenal */}
+        {activeTab === 'weapons' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {Object.values(WEAPONS).map((gun) => {
+              const isDefault = gun.price === 0;
+
+              return (
+                <div
+                  key={gun.id}
+                  className="p-4 rounded-sm border bg-zinc-950 border-zinc-800 flex flex-col justify-between gap-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-12 h-12 rounded-sm bg-zinc-900 border border-zinc-800 flex items-center justify-center text-2xl shadow-inner">
+                      {gun.icon}
+                    </div>
+                    <div>
+                      <h3 className="font-serif text-sm uppercase text-amber-300 tracking-wider">
+                        {gun.name}
+                      </h3>
+                      <p className="text-[11px] text-zinc-400 font-sans mt-0.5">{gun.description}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-zinc-400 bg-zinc-900/50 p-2 rounded-xs border border-zinc-800/80">
+                    <div>DMG: <span className="text-red-400 font-bold">{gun.damage}</span></div>
+                    <div>CLIP: <span className="text-amber-400 font-bold">{gun.maxClip}</span></div>
+                    <div>FIRE: <span className="text-cyan-400 font-bold">{gun.fireRateMs}ms</span></div>
+                    <div>RELOAD: <span className="text-emerald-400 font-bold">{(gun.reloadTimeMs/1000).toFixed(1)}s</span></div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-zinc-800">
+                    <span className="text-xs font-mono font-bold text-amber-400">
+                      {isDefault ? 'Standard Issue' : `✧ ${gun.price} Fragments`}
+                    </span>
+                    <button
+                      onClick={() => {
+                        sound.playWin();
+                      }}
+                      className="px-3 py-1.5 text-xs font-mono font-bold uppercase rounded-sm bg-amber-500 hover:bg-amber-400 text-zinc-950 active:scale-95"
+                    >
+                      {isDefault ? 'Unlocked' : 'Armed'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Tab 1: Skins Catalog */}
         {activeTab === 'skins' && (
@@ -211,15 +284,15 @@ export const ShopModal: React.FC<ShopModalProps> = ({
               <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
                 <span className="text-xs font-mono text-zinc-400">Owned: {inventory.speedBoosts}</span>
                 <button
-                  onClick={() => onBuyPowerUp('speed', 50)}
-                  disabled={totalCoins < 50}
+                  onClick={() => onBuyPowerUp('speed', 250)}
+                  disabled={totalCoins < 250}
                   className={`px-3 py-1.5 text-xs font-mono font-bold uppercase rounded-sm transition-all ${
-                    totalCoins >= 50
+                    totalCoins >= 250
                       ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950 active:scale-95'
                       : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
                   }`}
                 >
-                  Buy (✧ 50)
+                  Buy (✧ 250)
                 </button>
               </div>
             </div>
@@ -239,15 +312,15 @@ export const ShopModal: React.FC<ShopModalProps> = ({
               <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
                 <span className="text-xs font-mono text-zinc-400">Owned: {inventory.ghostSteps}</span>
                 <button
-                  onClick={() => onBuyPowerUp('ghost', 75)}
-                  disabled={totalCoins < 75}
+                  onClick={() => onBuyPowerUp('ghost', 350)}
+                  disabled={totalCoins < 350}
                   className={`px-3 py-1.5 text-xs font-mono font-bold uppercase rounded-sm transition-all ${
-                    totalCoins >= 75
+                    totalCoins >= 350
                       ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950 active:scale-95'
                       : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
                   }`}
                 >
-                  Buy (✧ 75)
+                  Buy (✧ 350)
                 </button>
               </div>
             </div>
@@ -267,15 +340,15 @@ export const ShopModal: React.FC<ShopModalProps> = ({
               <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
                 <span className="text-xs font-mono text-zinc-400">Owned: {inventory.hintsAvailable}</span>
                 <button
-                  onClick={() => onBuyPowerUp('hint', 40)}
-                  disabled={totalCoins < 40}
+                  onClick={() => onBuyPowerUp('hint', 180)}
+                  disabled={totalCoins < 180}
                   className={`px-3 py-1.5 text-xs font-mono font-bold uppercase rounded-sm transition-all ${
-                    totalCoins >= 40
+                    totalCoins >= 180
                       ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950 active:scale-95'
                       : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
                   }`}
                 >
-                  Buy (✧ 40)
+                  Buy (✧ 180)
                 </button>
               </div>
             </div>
@@ -342,7 +415,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
                     Watch Sponsored Video Ad
                   </h3>
                   <p className="text-xs text-zinc-400 font-sans mt-0.5">
-                    Watch a short 6-second video ad to receive +150 Soul Fragments instantly!
+                    Watch a short 6-second video ad to receive +500 Soul Fragments instantly!
                   </p>
                 </div>
               </div>
@@ -355,7 +428,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
                 className="w-full sm:w-auto px-6 py-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-mono text-xs uppercase font-bold tracking-widest rounded-sm transition-all active:scale-95 shadow-lg shadow-amber-500/20 shrink-0 flex items-center justify-center gap-2"
               >
                 <Sparkles className="w-4 h-4" />
-                <span>Watch Ad (+150 Coins)</span>
+                <span>Watch Ad (+500 Coins Boost)</span>
               </button>
             </div>
 

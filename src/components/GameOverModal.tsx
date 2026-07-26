@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { Trophy, RotateCcw, Play, Star, Timer, Footprints, ArrowRight, Share2 } from 'lucide-react';
+import { Trophy, RotateCcw, Play, Star, Timer, Footprints, ArrowRight, Share2, Sparkles } from 'lucide-react';
 import { Difficulty, GameMode } from '../types/maze';
 
 interface GameOverModalProps {
@@ -14,6 +14,8 @@ interface GameOverModalProps {
   onRestart: () => void;
   onNextLevel: () => void;
   onBackToMenu: () => void;
+  onSkipLevelWithAds?: () => void;
+  skipLevelAdCount?: number;
 }
 
 export const GameOverModal: React.FC<GameOverModalProps> = ({
@@ -27,6 +29,8 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   onRestart,
   onNextLevel,
   onBackToMenu,
+  onSkipLevelWithAds,
+  skipLevelAdCount = 0,
 }) => {
   const isWon = status === 'won';
 
@@ -137,31 +141,45 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         </div>
 
         {/* Buttons */}
-        <div className="flex items-center gap-3 w-full mt-2 font-mono uppercase text-xs">
-          <button
-            onClick={onBackToMenu}
-            className="flex-1 py-3 font-bold rounded-sm bg-zinc-950 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-all active:scale-95"
-          >
-            Menu
-          </button>
-
-          <button
-            onClick={onRestart}
-            className="flex-1 py-3 font-bold rounded-sm bg-zinc-950 hover:bg-zinc-800 text-amber-400 border border-zinc-800 flex items-center justify-center gap-1.5 transition-all active:scale-95"
-          >
-            <RotateCcw className="w-4 h-4 text-amber-500" />
-            Retry
-          </button>
-
-          {isWon && (
+        <div className="flex flex-col gap-2.5 w-full mt-2 font-mono uppercase text-xs">
+          {!isWon && onSkipLevelWithAds && (
             <button
-              onClick={onNextLevel}
-              className="flex-1 py-3 font-bold rounded-sm bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 transition-all active:scale-95"
+              onClick={onSkipLevelWithAds}
+              className="w-full py-3.5 font-extrabold rounded-sm bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-zinc-950 flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 active:scale-95 transition-all cursor-pointer"
             >
-              <span>Next</span>
-              <ArrowRight className="w-4 h-4" />
+              <Sparkles className="w-4 h-4 fill-zinc-950" />
+              <span>
+                {skipLevelAdCount === 1 ? 'Watch 1 More Ad to Skip Level' : 'Skip Hard Level (Watch 2 Ads)'}
+              </span>
             </button>
           )}
+
+          <div className="flex items-center gap-3 w-full font-mono uppercase text-xs">
+            <button
+              onClick={onBackToMenu}
+              className="flex-1 py-3 font-bold rounded-sm bg-zinc-950 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-all active:scale-95"
+            >
+              Menu
+            </button>
+
+            <button
+              onClick={onRestart}
+              className="flex-1 py-3 font-bold rounded-sm bg-zinc-950 hover:bg-zinc-800 text-amber-400 border border-zinc-800 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+            >
+              <RotateCcw className="w-4 h-4 text-amber-500" />
+              Retry
+            </button>
+
+            {isWon && (
+              <button
+                onClick={onNextLevel}
+                className="flex-1 py-3 font-bold rounded-sm bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 transition-all active:scale-95"
+              >
+                <span>Next</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

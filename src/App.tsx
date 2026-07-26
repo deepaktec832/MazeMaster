@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { User, onAuthStateChanged } from 'firebase/auth';
 import {
   Cell,
   Difficulty,
@@ -17,6 +18,12 @@ import { THEMES } from './utils/themes';
 import { sound } from './utils/sound';
 import { SKINS, INITIAL_ACHIEVEMENTS } from './utils/shopAndAchievements';
 import { initAdMob } from './utils/admobService';
+import {
+  auth,
+  syncUserDataToCloud,
+  loadUserDataFromCloud,
+  submitGlobalLeaderboardScore,
+} from './utils/firebase';
 import { HeaderBar } from './components/HeaderBar';
 import { MazeBoard } from './components/MazeBoard';
 import { Controls } from './components/Controls';
@@ -33,6 +40,9 @@ import { CampaignMapModal } from './components/CampaignMapModal';
 import { DailyRewardModal } from './components/DailyRewardModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
 import { MobileDeviceFrame } from './components/MobileDeviceFrame';
+import { GoogleAuthModal } from './components/GoogleAuthModal';
+import { PuzzleGamesModal } from './components/PuzzleGamesModal';
+import { FPSMaze3D } from './components/FPSMaze3D';
 
 const STATS_KEY = 'mazemaster_player_stats_v2';
 const SKINS_KEY = 'mazemaster_unlocked_skins_v2';
@@ -113,7 +123,11 @@ export default function App() {
   const [isCampaignOpen, setIsCampaignOpen] = useState<boolean>(false);
   const [isDailyRewardOpen, setIsDailyRewardOpen] = useState<boolean>(false);
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState<boolean>(false);
-  const [adRewardType, setAdRewardType] = useState<'coins' | 'hint' | 'speed'>('coins');
+  const [isGoogleAuthOpen, setIsGoogleAuthOpen] = useState<boolean>(false);
+  const [isPuzzlesOpen, setIsPuzzlesOpen] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [adRewardType, setAdRewardType] = useState<'coins' | 'hint' | 'speed' | 'skip_level'>('coins');
+  const [skipLevelAdCount, setSkipLevelAdCount] = useState<number>(0);
 
   // Maze State
   const [grid, setGrid] = useState<Cell[][]>([]);
@@ -162,6 +176,71 @@ export default function App() {
   // Initialize Capacitor AdMob plugin
   useEffect(() => {
     initAdMob();
+  }, []);
+
+  // Firebase Auth & Cloud State Synchronization
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        // Mark Google connected achievement
+        setAchievements((prev) =>
+          prev.map((ach) => {
+            if (ach.id === 'google_connected' && !ach.completed) {
+              return { ...ach, progress: 1, completed: true };
+            }
+            return ach;
+          })
+        );
+
+        // Fetch cloud state
+        const cloudData = await loadUserDataFromCloud(user.uid);
+        if (cloudData) {
+          if (cloudData.stats) setStats(cloudData.stats);
+          if (cloudData.completedLevels) setCompletedLevels(cloudData.completedLevels);
+          if (cloudData.unlockedSkins) setUnlockedSkins(cloudData.unlockedSkins);
+          if (cloudData.activeSkin) setActiveSkin(cloudData.activeSkin);
+          if (cloudData.achievements) setAchievements(cloudData.achievements);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sync state to cloud whenever user or stats change
+  useEffect(() => {
+    if (currentUser) {
+      syncUserDataToCloud(currentUser.uid, {
+        displayName: currentUser.displayName,
+        email: currentUser.email,
+        photoURL: currentUser.photoURL,
+        stats,
+        completedLevels,
+        unlockedSkins,
+        activeSkin,
+        achievements,
+      });
+      const totalStars = Object.values(completedLevels).reduce((acc, curr) => acc + curr.stars, 0);
+      submitGlobalLeaderboardScore(currentUser, stats, totalStars);
+    }
+  }, [currentUser, stats, completedLevels, unlockedSkins, activeSkin, achievements]);
+
+  const handleAwardCoins = useCallback((amount: number) => {
+    setStats((prev) => ({
+      ...prev,
+      totalCoins: prev.totalCoins + amount,
+    }));
+  }, []);
+
+  const handleUnlockAchievement = useCallback((id: string) => {
+    setAchievements((prev) =>
+      prev.map((ach) => {
+        if (ach.id === id) {
+          return { ...ach, progress: ach.target, completed: true };
+        }
+        return ach;
+      })
+    );
   }, []);
 
   // Timer Ref
@@ -375,6 +454,71 @@ export default function App() {
     };
   }, [gameStatus, mode, monsterPos, grid, playerPos, rows, cols, difficulty]);
 
+  // Game Win Handler
+  const handleGameWin = useCallback(
+    (timeSec?: number, bonusCoins = 15, starsEarned = 3) => {
+      sound.playWin();
+
+      const finalTime = timeSec !== undefined ? timeSec : timeElapsed;
+      const timeKey = `${mode}_${difficulty}`;
+      const prevBest = stats.bestTimes[timeKey] || 9999;
+      const newBest = finalTime < prevBest;
+
+      setIsNewBestTime(newBest);
+      setGameStatus('won');
+
+      let levelStars = starsEarned;
+      if (timeSec === undefined) {
+        if (finalTime <= 40 || moveCount <= 35) levelStars = 3;
+        else if (finalTime <= 80 || moveCount <= 60) levelStars = 2;
+        else levelStars = 1;
+      }
+
+      if (currentLevelIndex !== null) {
+        const updatedLevels = {
+          ...completedLevels,
+          [currentLevelIndex]: {
+            stars: Math.max(completedLevels[currentLevelIndex]?.stars || 0, levelStars),
+            bestTime: Math.min(completedLevels[currentLevelIndex]?.bestTime || 999, finalTime),
+          },
+        };
+        setCompletedLevels(updatedLevels);
+        localStorage.setItem(COMPLETED_LEVELS_KEY, JSON.stringify(updatedLevels));
+      }
+
+      const updatedStats = {
+        ...stats,
+        gamesWon: stats.gamesWon + 1,
+        totalCoins: stats.totalCoins + coinsCount + bonusCoins,
+        totalStars: stats.totalStars + levelStars,
+        bestTimes: {
+          ...stats.bestTimes,
+          [timeKey]: newBest ? finalTime : prevBest,
+        },
+      };
+      saveStats(updatedStats);
+      checkAchievements(updatedStats);
+
+      if (finalTime <= 35) {
+        setAchievements((prev) =>
+          prev.map((a) => (a.id === 'speed_daemon' ? { ...a, progress: 1, completed: true } : a))
+        );
+      }
+    },
+    [
+      timeElapsed,
+      mode,
+      difficulty,
+      stats,
+      moveCount,
+      currentLevelIndex,
+      completedLevels,
+      coinsCount,
+      checkAchievements,
+      saveStats,
+    ]
+  );
+
   // Movement Logic
   const handleMove = useCallback(
     (direction: 'top' | 'right' | 'bottom' | 'left') => {
@@ -465,51 +609,7 @@ export default function App() {
 
       // Check Win
       if (targetRow === goalPos.row && targetCol === goalPos.col) {
-        sound.playWin();
-
-        const timeKey = `${mode}_${difficulty}`;
-        const prevBest = stats.bestTimes[timeKey] || 9999;
-        const newBest = timeElapsed < prevBest;
-
-        setIsNewBestTime(newBest);
-        setGameStatus('won');
-
-        // Calculate Campaign Stars (1-3)
-        let levelStars = 1;
-        if (timeElapsed <= 40 || moveCount <= 35) levelStars = 3;
-        else if (timeElapsed <= 80 || moveCount <= 60) levelStars = 2;
-
-        if (currentLevelIndex !== null) {
-          const updatedLevels = {
-            ...completedLevels,
-            [currentLevelIndex]: {
-              stars: Math.max(completedLevels[currentLevelIndex]?.stars || 0, levelStars),
-              bestTime: Math.min(completedLevels[currentLevelIndex]?.bestTime || 999, timeElapsed),
-            },
-          };
-          setCompletedLevels(updatedLevels);
-          localStorage.setItem(COMPLETED_LEVELS_KEY, JSON.stringify(updatedLevels));
-        }
-
-        const updatedStats = {
-          ...stats,
-          gamesWon: stats.gamesWon + 1,
-          totalCoins: stats.totalCoins + coinsCount + 15,
-          totalStars: stats.totalStars + levelStars,
-          bestTimes: {
-            ...stats.bestTimes,
-            [timeKey]: newBest ? timeElapsed : prevBest,
-          },
-        };
-        saveStats(updatedStats);
-        checkAchievements(updatedStats);
-
-        // Speed daemon achievement check
-        if (timeElapsed <= 35) {
-          setAchievements((prev) =>
-            prev.map((a) => (a.id === 'speed_daemon' ? { ...a, progress: 1, completed: true } : a))
-          );
-        }
+        handleGameWin();
       }
     },
     [
@@ -522,15 +622,7 @@ export default function App() {
       keysCount,
       goalPos,
       hintPath,
-      mode,
-      difficulty,
-      timeElapsed,
-      moveCount,
-      coinsCount,
-      currentLevelIndex,
-      completedLevels,
-      stats,
-      checkAchievements,
+      handleGameWin,
     ]
   );
 
@@ -662,10 +754,16 @@ export default function App() {
     sound.playPowerUp();
   };
 
+  const handleSkipLevelAdClick = () => {
+    sound.playButtonClick();
+    setAdRewardType('skip_level');
+    setIsAdModalOpen(true);
+  };
+
   // Rewarded Ad Grant
-  const handleAdRewardGranted = (type: 'coins' | 'hint' | 'speed', coinsAmount = 150) => {
+  const handleAdRewardGranted = (type: 'coins' | 'hint' | 'speed' | 'skip_level', coinsAmount = 500) => {
     const nextAdsWatched = stats.adsWatched + 1;
-    const nextCoins = stats.totalCoins + coinsAmount;
+    const nextCoins = stats.totalCoins + (type === 'skip_level' ? 100 : coinsAmount);
     const nextStats = {
       ...stats,
       totalCoins: nextCoins,
@@ -677,6 +775,44 @@ export default function App() {
 
     if (type === 'hint') setInventory((inv) => ({ ...inv, hintsAvailable: inv.hintsAvailable + 1 }));
     if (type === 'speed') setInventory((inv) => ({ ...inv, speedBoosts: inv.speedBoosts + 1 }));
+
+    if (type === 'skip_level') {
+      const nextCount = skipLevelAdCount + 1;
+      if (nextCount >= 2) {
+        setSkipLevelAdCount(0);
+        sound.playWin();
+
+        let levelStars = 3;
+        if (currentLevelIndex !== null) {
+          const updatedLevels = {
+            ...completedLevels,
+            [currentLevelIndex]: {
+              stars: Math.max(completedLevels[currentLevelIndex]?.stars || 0, levelStars),
+              bestTime: Math.min(completedLevels[currentLevelIndex]?.bestTime || 999, 30),
+            },
+          };
+          setCompletedLevels(updatedLevels);
+          localStorage.setItem(COMPLETED_LEVELS_KEY, JSON.stringify(updatedLevels));
+        } else {
+          // Unlock current highest campaign level
+          const highestCleared = Object.keys(completedLevels).map(Number).reduce((max, lvl) => Math.max(max, lvl), 0);
+          const targetLevelToSkip = highestCleared + 1;
+          const updatedLevels = {
+            ...completedLevels,
+            [targetLevelToSkip]: {
+              stars: 3,
+              bestTime: 30,
+            },
+          };
+          setCompletedLevels(updatedLevels);
+          localStorage.setItem(COMPLETED_LEVELS_KEY, JSON.stringify(updatedLevels));
+        }
+
+        setGameStatus('won');
+      } else {
+        setSkipLevelAdCount(1);
+      }
+    }
   };
 
   // Claim Daily Wheel Reward
@@ -742,8 +878,11 @@ export default function App() {
             onOpenCampaign={() => setIsCampaignOpen(true)}
             onOpenDailyReward={() => setIsDailyRewardOpen(true)}
             onOpenLeaderboard={() => setIsLeaderboardOpen(true)}
+            onOpenGoogleAuth={() => setIsGoogleAuthOpen(true)}
+            onOpenPuzzles={() => setIsPuzzlesOpen(true)}
             onToggleMobileShell={() => setIsMobileShellActive(!isMobileShellActive)}
             isMobileShellActive={isMobileShellActive}
+            currentUser={currentUser}
             onOpenEditor={() => setGameStatus('editor')}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenShop={() => setIsShopOpen(true)}
@@ -768,77 +907,112 @@ export default function App() {
 
         {/* GAMEPLAY SCREEN */}
         {(gameStatus === 'playing' || gameStatus === 'paused' || gameStatus === 'won' || gameStatus === 'lost') && (
-          <div className="flex flex-col items-center gap-3 w-full max-w-5xl my-auto">
-            <HeaderBar
-              mode={mode}
-              difficulty={difficulty}
-              timeElapsed={timeElapsed}
-              timeLimit={timeLimit}
-              moveCount={moveCount}
-              coinsCount={coinsCount}
-              keysCount={keysCount}
-              isMuted={isMuted}
-              isPaused={gameStatus === 'paused'}
-              onToggleMute={() => setIsMuted(sound.toggleMute())}
-              onTogglePause={() => setGameStatus((s) => (s === 'playing' ? 'paused' : 'playing'))}
-              onOpenSettings={() => setIsSettingsOpen(true)}
-              onOpenShop={() => setIsShopOpen(true)}
-              onOpenAchievements={() => setIsAchievementsOpen(true)}
-              onBackToMenu={() => {
-                sound.playButtonClick();
-                setGameStatus('menu');
-              }}
-            />
-
-            {/* MAIN MAZE BOARD WITH 3D PERSPECTIVE */}
-            <div className="w-full h-[58vh] sm:h-[62vh] max-h-[680px]">
-              <MazeBoard
+          <div className="w-full h-screen fixed inset-0 z-30 bg-zinc-950">
+            {is3DView ? (
+              <FPSMaze3D
                 grid={grid}
                 rows={rows}
                 cols={cols}
-                playerPos={playerPos}
-                goalPos={goalPos}
-                monsterPos={monsterPos}
-                theme={activeTheme}
+                difficulty={difficulty}
                 gameMode={mode}
-                hintPath={hintPath}
-                unlockedKeys={keysCount}
-                hasGhostMode={activePowerUps.ghostModeRemaining > 0}
-                activeSkin={activeSkin}
-                is3DView={is3DView}
-                onToggle3D={() => setIs3DView(!is3DView)}
-                onMove={handleMove}
-                onTileClick={(r, c) => {
-                  if (Math.abs(r - playerPos.row) + Math.abs(c - playerPos.col) === 1) {
-                    if (r < playerPos.row) handleMove('top');
-                    else if (r > playerPos.row) handleMove('bottom');
-                    else if (c < playerPos.col) handleMove('left');
-                    else if (c > playerPos.col) handleMove('right');
-                  } else {
-                    const dr = r - playerPos.row;
-                    const dc = c - playerPos.col;
-                    if (Math.abs(dr) >= Math.abs(dc)) {
-                      if (dr < 0) handleMove('top');
-                      else if (dr > 0) handleMove('bottom');
-                    } else {
-                      if (dc < 0) handleMove('left');
-                      else if (dc > 0) handleMove('right');
-                    }
-                  }
+                onWin={(timeInSec, coins, stars) => handleGameWin(timeInSec, coins, stars)}
+                onLose={() => setGameStatus('lost')}
+                onBackToMenu={() => setGameStatus('menu')}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+                powerUps={inventory}
+                onUsePowerUp={(type) => {
+                  if (type === 'speed') { useSpeedBoost(); return true; }
+                  if (type === 'ghost') { useGhostMode(); return true; }
+                  if (type === 'hint') { useAIHint(); return true; }
+                  return false;
                 }}
+                activePowerUps={activePowerUps}
+                onWatchAdClick={() => {
+                  setAdRewardType('coins');
+                  setIsAdModalOpen(true);
+                }}
+                onSkipLevelWithAds={handleSkipLevelAdClick}
+                skipLevelAdCount={skipLevelAdCount}
               />
-            </div>
+            ) : (
+              <>
+                <HeaderBar
+                  mode={mode}
+                  difficulty={difficulty}
+                  timeElapsed={timeElapsed}
+                  timeLimit={timeLimit}
+                  moveCount={moveCount}
+                  coinsCount={coinsCount}
+                  keysCount={keysCount}
+                  isMuted={isMuted}
+                  isPaused={gameStatus === 'paused'}
+                  currentUser={currentUser}
+                  onToggleMute={() => setIsMuted(sound.toggleMute())}
+                  onTogglePause={() => setGameStatus((s) => (s === 'playing' ? 'paused' : 'playing'))}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                  onOpenShop={() => setIsShopOpen(true)}
+                  onOpenAchievements={() => setIsAchievementsOpen(true)}
+                  onOpenGoogleAuth={() => setIsGoogleAuthOpen(true)}
+                  onOpenPuzzles={() => setIsPuzzlesOpen(true)}
+                  onBackToMenu={() => {
+                    sound.playButtonClick();
+                    setGameStatus('menu');
+                  }}
+                  onSkipLevelWithAds={handleSkipLevelAdClick}
+                  skipLevelAdCount={skipLevelAdCount}
+                />
 
-            {/* CONTROLS BAR */}
-            <Controls
-              onMove={handleMove}
-              onUseSpeed={useSpeedBoost}
-              onUseGhost={useGhostMode}
-              onUseHint={useAIHint}
-              inventory={inventory}
-              activePowerUps={activePowerUps}
-              showingHint={hintPath.length > 0}
-            />
+                {/* MAIN MAZE BOARD WITH 3D PERSPECTIVE */}
+                <div className="w-full h-[58vh] sm:h-[62vh] max-h-[680px]">
+                  <MazeBoard
+                    grid={grid}
+                    rows={rows}
+                    cols={cols}
+                    playerPos={playerPos}
+                    goalPos={goalPos}
+                    monsterPos={monsterPos}
+                    theme={activeTheme}
+                    gameMode={mode}
+                    hintPath={hintPath}
+                    unlockedKeys={keysCount}
+                    hasGhostMode={activePowerUps.ghostModeRemaining > 0}
+                    activeSkin={activeSkin}
+                    is3DView={is3DView}
+                    onToggle3D={() => setIs3DView(!is3DView)}
+                    onMove={handleMove}
+                    onTileClick={(r, c) => {
+                      if (Math.abs(r - playerPos.row) + Math.abs(c - playerPos.col) === 1) {
+                        if (r < playerPos.row) handleMove('top');
+                        else if (r > playerPos.row) handleMove('bottom');
+                        else if (c < playerPos.col) handleMove('left');
+                        else if (c > playerPos.col) handleMove('right');
+                      } else {
+                        const dr = r - playerPos.row;
+                        const dc = c - playerPos.col;
+                        if (Math.abs(dr) >= Math.abs(dc)) {
+                          if (dr < 0) handleMove('top');
+                          else if (dr > 0) handleMove('bottom');
+                        } else {
+                          if (dc < 0) handleMove('left');
+                          else if (dc > 0) handleMove('right');
+                        }
+                      }
+                    }}
+                  />
+                </div>
+
+                {/* CONTROLS BAR */}
+                <Controls
+                  onMove={handleMove}
+                  onUseSpeed={useSpeedBoost}
+                  onUseGhost={useGhostMode}
+                  onUseHint={useAIHint}
+                  inventory={inventory}
+                  activePowerUps={activePowerUps}
+                  showingHint={hintPath.length > 0}
+                />
+              </>
+            )}
           </div>
         )}
 
@@ -869,6 +1043,8 @@ export default function App() {
               handleStartGame(mode, difficulty, currentLevelIndex !== null ? currentLevelIndex + 1 : null)
             }
             onBackToMenu={() => setGameStatus('menu')}
+            onSkipLevelWithAds={handleSkipLevelAdClick}
+            skipLevelAdCount={skipLevelAdCount}
           />
         )}
 
@@ -880,6 +1056,8 @@ export default function App() {
             handleStartGame(selectedMode, selectedDiff, lvlIdx);
           }}
           completedLevels={completedLevels}
+          onSkipLevelWithAds={handleSkipLevelAdClick}
+          skipLevelAdCount={skipLevelAdCount}
         />
 
         {/* DAILY LUCKY WHEEL MODAL */}
@@ -955,6 +1133,26 @@ export default function App() {
             onSelectDifficulty={(d) => setDifficulty(d)}
             onToggleMute={() => setIsMuted(sound.toggleMute())}
             onClose={() => setIsSettingsOpen(false)}
+          />
+        )}
+
+        {/* GOOGLE CLOUD AUTH MODAL */}
+        {isGoogleAuthOpen && (
+          <GoogleAuthModal
+            currentUser={currentUser}
+            onUserChanged={setCurrentUser}
+            onClose={() => setIsGoogleAuthOpen(false)}
+            totalCoins={stats.totalCoins}
+            totalStars={Object.values(completedLevels).reduce((acc, curr) => acc + curr.stars, 0)}
+          />
+        )}
+
+        {/* BRAIN PUZZLE MINI-GAMES MODAL */}
+        {isPuzzlesOpen && (
+          <PuzzleGamesModal
+            onClose={() => setIsPuzzlesOpen(false)}
+            onAwardCoins={handleAwardCoins}
+            onUnlockAchievement={handleUnlockAchievement}
           />
         )}
       </div>
