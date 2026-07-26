@@ -14,33 +14,33 @@ export interface AdMobStatus {
 
 let isAdMobInitialized = false;
 let initPromise: Promise<boolean> | null = null;
+let bannerActive = false;
 
 /**
- * Initialize Google AdMob Capacitor Plugin
+ * Initialize Google AdMob Capacitor Plugin safely
  */
 export async function initAdMob(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) {
-    console.log('[AdMob Capacitor Plugin] Running in web browser; skipping native initialization.');
+    console.log('[AdMob] Running in web environment; skipping native plugin initialization.');
     return false;
   }
 
   if (isAdMobInitialized) return true;
-
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
     try {
-      // Small delay to ensure Android WebView is fully attached to parent layout
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      // Delay to ensure Android Activity layout & WebView view tree are fully mounted
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       await AdMob.initialize({
         initializeForTesting: true,
       });
       isAdMobInitialized = true;
-      console.log('[AdMob Capacitor Plugin] Successfully initialized on native device.');
+      console.log('[AdMob] Native AdMob initialized successfully.');
       return true;
     } catch (error) {
-      console.warn('[AdMob Capacitor Plugin] Native AdMob initialization error:', error);
+      console.warn('[AdMob] Native initialization failed or AdMob App ID missing:', error);
       isAdMobInitialized = false;
       return false;
     }
@@ -50,20 +50,19 @@ export async function initAdMob(): Promise<boolean> {
 }
 
 /**
- * Show AdMob Bottom Banner Ad (Test Unit ID: ca-app-pub-3940256099942544/6300978111)
+ * Show AdMob Bottom Banner Ad safely (Test Unit ID: ca-app-pub-3940256099942544/6300978111)
  */
 export async function showAdMobBanner(): Promise<boolean> {
-  if (!Capacitor.isNativePlatform()) {
+  if (!Capacitor.isNativePlatform() || bannerActive) {
     return false;
   }
 
   try {
-    // Ensure initialization complete before attempting to attach banner view
     const initialized = await initAdMob();
     if (!initialized) return false;
 
-    // Safety delay to guarantee ViewGroup parent is non-null
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Safety delay to guarantee native Activity view hierarchy is non-null
+    await new Promise((resolve) => setTimeout(resolve, 800));
 
     await AdMob.showBanner({
       adId: 'ca-app-pub-3940256099942544/6300978111',
@@ -72,21 +71,29 @@ export async function showAdMobBanner(): Promise<boolean> {
       margin: 0,
       isTesting: true,
     });
+    bannerActive = true;
     return true;
   } catch (error) {
-    console.warn('[AdMob Banner] Banner not supported or view not attached:', error);
+    console.warn('[AdMob Banner] Banner display skipped or view not attached:', error);
+    bannerActive = false;
     return false;
   }
 }
 
 /**
- * Hide AdMob Bottom Banner Ad
+ * Hide AdMob Bottom Banner Ad safely
  */
 export async function hideAdMobBanner(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) {
+    return false;
+  }
+
   try {
     await AdMob.hideBanner();
+    bannerActive = false;
     return true;
   } catch {
+    bannerActive = false;
     return false;
   }
 }
@@ -95,7 +102,14 @@ export async function hideAdMobBanner(): Promise<boolean> {
  * Show AdMob Interstitial Fullscreen Ad (Test Unit ID: ca-app-pub-3940256099942544/1033173712)
  */
 export async function showAdMobInterstitial(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) {
+    return false;
+  }
+
   try {
+    const initialized = await initAdMob();
+    if (!initialized) return false;
+
     await AdMob.prepareInterstitial({
       adId: 'ca-app-pub-3940256099942544/1033173712',
       isTesting: true,
@@ -103,7 +117,7 @@ export async function showAdMobInterstitial(): Promise<boolean> {
     await AdMob.showInterstitial();
     return true;
   } catch (error) {
-    console.warn('[AdMob Interstitial] Interstitial fallback triggered:', error);
+    console.warn('[AdMob Interstitial] Interstitial ad skipped:', error);
     return false;
   }
 }
@@ -112,7 +126,14 @@ export async function showAdMobInterstitial(): Promise<boolean> {
  * Show AdMob Rewarded Video Ad (Test Unit ID: ca-app-pub-3940256099942544/5224354911)
  */
 export async function showAdMobRewarded(onRewarded: () => void): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) {
+    return false;
+  }
+
   try {
+    const initialized = await initAdMob();
+    if (!initialized) return false;
+
     const handle = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (_reward: AdMobRewardItem) => {
       onRewarded();
       handle.remove();
@@ -125,7 +146,7 @@ export async function showAdMobRewarded(onRewarded: () => void): Promise<boolean
     await AdMob.showRewardVideoAd();
     return true;
   } catch (error) {
-    console.warn('[AdMob Rewarded] Rewarded video fallback triggered:', error);
+    console.warn('[AdMob Rewarded] Rewarded video skipped:', error);
     return false;
   }
 }
@@ -135,3 +156,4 @@ export const ADMOB_TEST_UNITS = {
   INTERSTITIAL: 'ca-app-pub-3940256099942544/1033173712',
   REWARDED: 'ca-app-pub-3940256099942544/5224354911',
 };
+
