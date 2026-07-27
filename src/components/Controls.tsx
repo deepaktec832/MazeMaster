@@ -23,7 +23,6 @@ export const Controls: React.FC<ControlsProps> = ({
   showingHint,
 }) => {
   const handleMove = (dir: 'top' | 'right' | 'bottom' | 'left') => {
-    sound.playMove();
     if (navigator.vibrate) {
       navigator.vibrate(10);
     }

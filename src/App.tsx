@@ -351,7 +351,7 @@ export default function App() {
       setDifficulty(effectiveDiff);
       setCurrentLevelIndex(levelIdx);
 
-      const dims = getGridDimensions(effectiveDiff);
+      const dims = getGridDimensions(effectiveDiff, levelIdx);
       setRows(dims.rows);
       setCols(dims.cols);
 
@@ -537,7 +537,7 @@ export default function App() {
 
       // Bounds check
       if (targetRow < 0 || targetRow >= rows || targetCol < 0 || targetCol >= cols) {
-        sound.playTrap();
+        sound.playWallBump();
         return;
       }
 
@@ -545,7 +545,7 @@ export default function App() {
       const isGhostActive = activePowerUps.ghostModeRemaining > 0;
 
       if (hasWall && !isGhostActive) {
-        sound.playTrap();
+        sound.playWallBump();
         return;
       }
 
@@ -558,7 +558,7 @@ export default function App() {
           setKeysCount((k) => k - 1);
           grid[targetRow][targetCol].item = undefined;
         } else {
-          sound.playTrap();
+          sound.playWallBump();
           return;
         }
       }
@@ -574,6 +574,7 @@ export default function App() {
       // Move player
       setPlayerPos({ row: targetRow, col: targetCol });
       setMoveCount((m) => m + 1);
+      sound.playMove();
 
       // Check item collection
       if (targetCell.item) {

@@ -58,11 +58,14 @@ export async function showAdMobBanner(): Promise<boolean> {
   }
 
   try {
-    const initialized = await initAdMob();
+    const initialized = await initAdMob().catch(() => false);
     if (!initialized) return false;
 
-    // Safety delay to guarantee native Activity view hierarchy is non-null
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    // Safety delay to guarantee native Activity view hierarchy is mounted
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Double check banner active status after delay
+    if (bannerActive) return true;
 
     await AdMob.showBanner({
       adId: 'ca-app-pub-3940256099942544/6300978111',

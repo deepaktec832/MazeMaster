@@ -7,10 +7,12 @@ import { MiniMapRadar } from './MiniMapRadar';
 import {
   Zap,
   Shield,
+  Heart,
   Crosshair,
   Sun,
   Moon,
   Key,
+  Coins,
   Skull,
   Target,
   RefreshCw,
@@ -23,6 +25,8 @@ import {
   Lock,
   CheckCircle,
   Sparkles,
+  Footprints,
+  CircleDot,
   X,
   Plus,
 } from 'lucide-react';
@@ -140,6 +144,20 @@ interface ExplosiveProjectile {
   posZ: number;
 }
 
+interface BloodDecal {
+  mesh: THREE.Mesh;
+  createdAt: number;
+  lifespanMs: number;
+  fadeStartMs: number;
+}
+
+interface ShellCasing {
+  mesh: THREE.Mesh;
+  velocity: THREE.Vector3;
+  rotVelocity: THREE.Vector3;
+  createdAt: number;
+}
+
 interface FPSMaze3DProps {
   grid: Cell[][];
   rows: number;
@@ -183,6 +201,7 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [isNightMode, setIsNightMode] = useState<boolean>(false);
   const [isArmoryOpen, setIsArmoryOpen] = useState<boolean>(false);
+  const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState<boolean>(false);
 
   // Player Armory Coins & Unlocked Weapons
   const [playerCoins, setPlayerCoins] = useState<number>(() => {
@@ -222,14 +241,34 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
 
   const [hitMarker, setHitMarker] = useState<boolean>(false);
   const [damageFlash, setDamageFlash] = useState<boolean>(false);
+  const [damageDirection, setDamageDirection] = useState<'AHEAD' | 'BEHIND' | 'LEFT' | 'RIGHT' | null>(null);
   const [muzzleFlashScreen, setMuzzleFlashScreen] = useState<boolean>(false);
   const [isHoveringEnemy, setIsHoveringEnemy] = useState<boolean>(false);
+  const isHoveringEnemyRef = useRef<boolean>(false);
   const [coinPopup, setCoinPopup] = useState<string | null>(null);
   const [timeElapsed, setTimeElapsed] = useState<number>(0);
+
+  // Thriller Threat & Tactical Movement States
+  const [threatAlert, setThreatAlert] = useState<{
+    active: boolean;
+    distance: number;
+    direction: string;
+    isChasing: boolean;
+  } | null>(null);
+
+  const [isCrouched, setIsCrouched] = useState<boolean>(false);
+  const isCrouchedRef = useRef<boolean>(false);
+  const lastHeartbeatTimeRef = useRef<number>(0);
+  const lastBreathingTimeRef = useRef<number>(0);
+  const dashCooldownRef = useRef<number>(0);
+  const isDashingRef = useRef<boolean>(false);
+  const dashTimerRef = useRef<number>(0);
 
   // GTA Touch Joystick & Look Ref
   const moveJoystickRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const lookJoystickRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [joystickOrigin, setJoystickOrigin] = useState<{ x: number; y: number } | null>(null);
+  const joystickOriginRef = useRef<{ x: number; y: number } | null>(null);
   const [joystickKnob, setJoystickKnob] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const joystickTouchIdRef = useRef<number | null>(null);
   const lookTouchIdRef = useRef<number | null>(null);
@@ -244,8 +283,9 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
   const weaponSwayYRef = useRef<number>(0);
   const keysDownRef = useRef<Record<string, boolean>>({});
 
-  // Combat Screen Shake
+  // Combat Screen Shake & Footstep Cadence
   const shakeIntensityRef = useRef<number>(0);
+  const footstepTimerRef = useRef<number>(0);
 
   // 3D Scene Refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -256,6 +296,322 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
   const enemiesRef = useRef<Enemy3D[]>([]);
   const enemyMeshesRef = useRef<Map<string, THREE.Group>>(new Map());
   const projectilesRef = useRef<ExplosiveProjectile[]>([]);
+  const bloodTexturesCacheRef = useRef<THREE.CanvasTexture[] | null>(null);
+  const decalsRef = useRef<BloodDecal[]>([]);
+  const shellCasingsRef = useRef<ShellCasing[]>([]);
+  const wallMeshesRef = useRef<THREE.Mesh[]>([]);
+
+  // Thorough Three.js WebGL memory disposal helper
+  const disposeObject = useCallback((obj: THREE.Object3D) => {
+    obj.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        if (mesh.geometry) {
+          mesh.geometry.dispose();
+        }
+        if (mesh.material) {
+          if (Array.isArray(mesh.material)) {
+            mesh.material.forEach((mat) => {
+              const m = mat as THREE.MeshBasicMaterial | THREE.MeshStandardMaterial;
+              if (m.map) m.map.dispose();
+              mat.dispose();
+            });
+          } else {
+            const m = mesh.material as THREE.MeshBasicMaterial | THREE.MeshStandardMaterial;
+            if (m.map) m.map.dispose();
+            mesh.material.dispose();
+          }
+        }
+      }
+    });
+  }, []);
+
+  // Stable synchronization refs to prevent gameLoop effect recreation crashes
+  const isPausedRef = useRef<boolean>(isPaused);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+
+  const showLevelMapPreviewRef = useRef<boolean>(showLevelMapPreview);
+  useEffect(() => { showLevelMapPreviewRef.current = showLevelMapPreview; }, [showLevelMapPreview]);
+
+  const isArmoryOpenRef = useRef<boolean>(isArmoryOpen);
+  useEffect(() => { isArmoryOpenRef.current = isArmoryOpen; }, [isArmoryOpen]);
+
+  const activePowerUpsRef = useRef(activePowerUps);
+  useEffect(() => { activePowerUpsRef.current = activePowerUps; }, [activePowerUps]);
+
+  const keysCollectedRef = useRef<number>(0);
+  useEffect(() => { keysCollectedRef.current = keysCollected; }, [keysCollected]);
+
+  const timeElapsedRef = useRef<number>(0);
+  useEffect(() => { timeElapsedRef.current = timeElapsed; }, [timeElapsed]);
+
+  const lastThreatUpdateRef = useRef<number>(0);
+
+  const handleShootRef = useRef<() => void>(() => {});
+  const spawnBloodDecalsRef = useRef<(x: number, y: number, z: number, count?: number, isFatal?: boolean) => void>(() => {});
+
+  const onWinRef = useRef(onWin);
+  useEffect(() => { onWinRef.current = onWin; }, [onWin]);
+
+  const onLoseRef = useRef(onLose);
+  useEffect(() => { onLoseRef.current = onLose; }, [onLose]);
+
+  // Generate Procedural Blood Splatter Textures
+  const getBloodTextures = useCallback(() => {
+    if (bloodTexturesCacheRef.current) return bloodTexturesCacheRef.current;
+
+    const textures: THREE.CanvasTexture[] = [];
+    const seeds = [1, 2, 3, 4];
+
+    seeds.forEach((seed) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, 256, 256);
+
+      const centerX = 128;
+      const centerY = 128;
+
+      // Outer radial dark blood fade
+      const mainGradient = ctx.createRadialGradient(centerX, centerY, 5, centerX, centerY, 90);
+      mainGradient.addColorStop(0, '#580000');
+      mainGradient.addColorStop(0.35, '#800000');
+      mainGradient.addColorStop(0.7, '#dc2626');
+      mainGradient.addColorStop(1, 'rgba(120, 0, 0, 0)');
+
+      // Draw irregular organic splatter shape
+      ctx.fillStyle = mainGradient;
+      ctx.beginPath();
+      const numPoints = 18 + seed * 4;
+      for (let i = 0; i < numPoints; i++) {
+        const angle = (i / numPoints) * Math.PI * 2;
+        const radiusNoise = 20 + Math.sin(angle * (3 + seed)) * 25 + Math.cos(angle * 7) * 15;
+        const px = centerX + Math.cos(angle) * (45 + radiusNoise);
+        const py = centerY + Math.sin(angle) * (45 + radiusNoise);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      // Deep dark coagulated core pool
+      const poolGrad = ctx.createRadialGradient(centerX - 4, centerY - 4, 2, centerX, centerY, 40);
+      poolGrad.addColorStop(0, '#2b0000');
+      poolGrad.addColorStop(0.65, '#5c0000');
+      poolGrad.addColorStop(1, 'rgba(60, 0, 0, 0)');
+      ctx.fillStyle = poolGrad;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 42, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Scattered Blood Droplets & Drip Streaks
+      const numDroplets = 28 + seed * 8;
+      for (let i = 0; i < numDroplets; i++) {
+        const dropAngle = (i / numDroplets) * Math.PI * 2 + seed * 0.4;
+        const dropDist = 35 + ((i * 11) % 85);
+        const dropRadius = 1.5 + (i % 4);
+        const dx = centerX + Math.cos(dropAngle) * dropDist;
+        const dy = centerY + Math.sin(dropAngle) * dropDist;
+
+        ctx.fillStyle = i % 2 === 0 ? '#7f1d1d' : '#b91c1c';
+        ctx.beginPath();
+        ctx.arc(dx, dy, dropRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Drip tail streak
+        if (i % 3 === 0) {
+          ctx.strokeStyle = '#450a0a';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(dx, dy);
+          ctx.lineTo(dx + Math.cos(dropAngle) * 10, dy + Math.sin(dropAngle) * 10);
+          ctx.stroke();
+        }
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.needsUpdate = true;
+      textures.push(tex);
+    });
+
+    bloodTexturesCacheRef.current = textures;
+    return textures;
+  }, []);
+
+  // Spawn Blood Splatter Decals on Walls & Floors
+  const spawnBloodDecals = useCallback(
+    (posX: number, posY: number, posZ: number, count: number = 3, isKill: boolean = false) => {
+      const scene = sceneRef.current;
+      if (!scene) return;
+
+      const textures = getBloodTextures();
+      if (!textures.length) return;
+
+      const now = performance.now();
+      const MAX_DECALS = 60; // Performance cap for active decals
+
+      // 1. Floor Blood Splatters
+      const floorCount = isKill ? count + 2 : count;
+      for (let i = 0; i < floorCount; i++) {
+        const tex = textures[Math.floor(Math.random() * textures.length)];
+        const size = (isKill ? 1.0 : 0.6) + Math.random() * 0.6;
+
+        const geo = new THREE.PlaneGeometry(size, size);
+        const mat = new THREE.MeshBasicMaterial({
+          map: tex,
+          transparent: true,
+          opacity: 0.85 + Math.random() * 0.15,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+        });
+
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.rotation.z = Math.random() * Math.PI * 2;
+
+        const offsetX = (Math.random() - 0.5) * (isKill ? 1.3 : 0.8);
+        const offsetZ = (Math.random() - 0.5) * (isKill ? 1.3 : 0.8);
+
+        // Position slightly above floor plane to avoid z-fighting
+        mesh.position.set(posX + offsetX, 0.018 + (decalsRef.current.length % 10) * 0.001, posZ + offsetZ);
+        scene.add(mesh);
+
+        decalsRef.current.push({
+          mesh,
+          createdAt: now,
+          lifespanMs: 16000 + Math.random() * 6000,
+          fadeStartMs: 11000 + Math.random() * 3000,
+        });
+      }
+
+      // 2. Wall Blood Splatters (Raycast outward to nearby walls)
+      const wallRaycaster = new THREE.Raycaster();
+      const directions = [
+        new THREE.Vector3(0, 0, -1),
+        new THREE.Vector3(0, 0, 1),
+        new THREE.Vector3(-1, 0, 0),
+        new THREE.Vector3(1, 0, 0),
+        new THREE.Vector3(0.707, 0, 0.707),
+        new THREE.Vector3(-0.707, 0, -0.707),
+      ];
+
+      const origin = new THREE.Vector3(posX, Math.max(0.7, posY), posZ);
+
+      directions.forEach((dir) => {
+        wallRaycaster.set(origin, dir);
+        wallRaycaster.far = 2.2;
+
+        const intersects = wallRaycaster.intersectObjects(wallMeshesRef.current, false);
+        for (let j = 0; j < intersects.length; j++) {
+          const hit = intersects[j];
+          if (hit.object && hit.face) {
+            // Ensure hit is a vertical wall face, not floor/ceiling or another decal
+            if (Math.abs(hit.face.normal.y) < 0.3) {
+              const tex = textures[Math.floor(Math.random() * textures.length)];
+              const size = 0.65 + Math.random() * 0.5;
+
+              const geo = new THREE.PlaneGeometry(size, size);
+              const mat = new THREE.MeshBasicMaterial({
+                map: tex,
+                transparent: true,
+                opacity: 0.85 + Math.random() * 0.15,
+                depthWrite: false,
+                polygonOffset: true,
+                polygonOffsetFactor: -1,
+              });
+
+              const decalMesh = new THREE.Mesh(geo, mat);
+              // Position slightly in front of the wall plane
+              decalMesh.position.copy(hit.point).add(hit.face.normal.clone().multiplyScalar(0.018));
+
+              // Align decal plane to face out from the wall
+              decalMesh.lookAt(hit.point.clone().add(hit.face.normal));
+              decalMesh.rotation.z += Math.random() * Math.PI * 2;
+
+              scene.add(decalMesh);
+
+              decalsRef.current.push({
+                mesh: decalMesh,
+                createdAt: now,
+                lifespanMs: 16000 + Math.random() * 6000,
+                fadeStartMs: 11000 + Math.random() * 3000,
+              });
+              break; // Place max 1 decal per wall ray
+            }
+          }
+        }
+      });
+
+      // Prune oldest decals if total count exceeds performance cap
+      while (decalsRef.current.length > MAX_DECALS) {
+        const oldest = decalsRef.current.shift();
+        if (oldest) {
+          scene.remove(oldest.mesh);
+          disposeObject(oldest.mesh);
+        }
+      }
+    },
+    [getBloodTextures, disposeObject]
+  );
+
+  // Spawn 3D Brass Shell Casings on Firearm Shot
+  const spawnShellCasing = useCallback(() => {
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    if (!scene || !camera) return;
+
+    const geo = new THREE.CylinderGeometry(0.012, 0.012, 0.05, 6);
+    const mat = new THREE.MeshStandardMaterial({
+      color: '#eab308',
+      metalness: 0.95,
+      roughness: 0.15,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+
+    const rightDir = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    const forwardDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const upDir = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+
+    const startPos = camera.position
+      .clone()
+      .add(rightDir.clone().multiplyScalar(0.25))
+      .add(forwardDir.clone().multiplyScalar(0.35))
+      .add(upDir.clone().multiplyScalar(-0.15));
+
+    mesh.position.copy(startPos);
+
+    const velocity = rightDir
+      .clone()
+      .multiplyScalar(1.8 + Math.random() * 0.8)
+      .add(upDir.clone().multiplyScalar(1.2 + Math.random() * 0.5))
+      .add(forwardDir.clone().multiplyScalar(-0.4 - Math.random() * 0.4));
+
+    const rotVelocity = new THREE.Vector3(
+      (Math.random() - 0.5) * 18,
+      (Math.random() - 0.5) * 18,
+      (Math.random() - 0.5) * 18
+    );
+
+    scene.add(mesh);
+    shellCasingsRef.current.push({
+      mesh,
+      velocity,
+      rotVelocity,
+      createdAt: performance.now(),
+    });
+
+    if (shellCasingsRef.current.length > 25) {
+      const oldest = shellCasingsRef.current.shift();
+      if (oldest) {
+        scene.remove(oldest.mesh);
+        disposeObject(oldest.mesh);
+      }
+    }
+  }, [disposeObject]);
 
   // Lights & Flashlight
   const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
@@ -532,6 +888,32 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
     flashMesh.visible = false;
     group.add(flashMesh);
 
+    // Attach Realistic Tactical Player Arms & Gloves
+    const sleeveMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.8 });
+    const gloveMat = new THREE.MeshStandardMaterial({ color: '#09090b', metalness: 0.3, roughness: 0.5 });
+
+    // Right Arm holding grip
+    const rArm = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.055, 0.45, 10), sleeveMat);
+    rArm.rotation.x = Math.PI / 2.8;
+    rArm.rotation.z = -Math.PI / 10;
+    rArm.position.set(0.1, -0.2, 0.12);
+    group.add(rArm);
+
+    const rGlove = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 0.12), gloveMat);
+    rGlove.position.set(0.02, -0.08, -0.04);
+    group.add(rGlove);
+
+    // Left Arm supporting under barrel
+    const lArm = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.42, 10), sleeveMat);
+    lArm.rotation.x = Math.PI / 3.8;
+    lArm.rotation.y = Math.PI / 5;
+    lArm.position.set(-0.15, -0.22, -0.1);
+    group.add(lArm);
+
+    const lGlove = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.08, 0.11), gloveMat);
+    lGlove.position.set(-0.06, -0.08, -0.22);
+    group.add(lGlove);
+
     group.userData = {
       basePos: group.position.clone(),
       muzzleLight,
@@ -608,7 +990,7 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
     const scene = new THREE.Scene();
     const bgColor = isNightMode ? '#0b1329' : '#1e293b';
     scene.background = new THREE.Color(bgColor);
-    scene.fog = new THREE.FogExp2(bgColor, 0.015);
+    scene.fog = new THREE.FogExp2(bgColor, 0.018);
     sceneRef.current = scene;
 
     // 2. Camera setup
@@ -616,11 +998,11 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
     camera.position.set(1.5, 1.2, 1.5);
     cameraRef.current = camera;
 
-    // 3. Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    // 3. Renderer with Optimized Performance Settings (1.5x pixel ratio cap, shadow map optimization)
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer.shadowMap.enabled = false; // Disable heavy dynamic shadows for buttery 60fps mobile performance
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -685,6 +1067,7 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
     scene.add(ceilingMesh);
 
     // Wall blocks
+    wallMeshesRef.current = [];
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const cell = grid[r][c];
@@ -695,21 +1078,25 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
           const w = new THREE.Mesh(new THREE.BoxGeometry(tileSize, wallHeight, 0.35), wallMat);
           w.position.set(cellX, wallHeight / 2, r * tileSize);
           scene.add(w);
+          wallMeshesRef.current.push(w);
         }
         if (cell.walls.bottom) {
           const w = new THREE.Mesh(new THREE.BoxGeometry(tileSize, wallHeight, 0.35), wallMat);
           w.position.set(cellX, wallHeight / 2, (r + 1) * tileSize);
           scene.add(w);
+          wallMeshesRef.current.push(w);
         }
         if (cell.walls.left && c === 0) {
           const w = new THREE.Mesh(new THREE.BoxGeometry(0.35, wallHeight, tileSize), wallMat);
           w.position.set(c * tileSize, wallHeight / 2, cellZ);
           scene.add(w);
+          wallMeshesRef.current.push(w);
         }
         if (cell.walls.right) {
           const w = new THREE.Mesh(new THREE.BoxGeometry(0.35, wallHeight, tileSize), wallMat);
           w.position.set((c + 1) * tileSize, wallHeight / 2, cellZ);
           scene.add(w);
+          wallMeshesRef.current.push(w);
         }
       }
     }
@@ -760,7 +1147,7 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
 
     // 7. Spawn Animated Monsters & Minotaurs
     const enemiesList: Enemy3D[] = [];
-    const numEnemies = Math.min(10, Math.floor(rows * cols * 0.12));
+    const numEnemies = Math.min(28, Math.max(4, Math.floor((rows * cols) / 22)));
 
     for (let i = 0; i < numEnemies; i++) {
       const randR = Math.floor(Math.random() * (rows - 2)) + 1;
@@ -838,46 +1225,78 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      if (rendererRef.current && rendererRef.current.domElement) {
-        rendererRef.current.domElement.remove();
+
+      if (sceneRef.current) {
+        sceneRef.current.traverse((child) => {
+          disposeObject(child);
+        });
+        sceneRef.current.clear();
+        sceneRef.current = null;
+      }
+
+      if (wallTex) wallTex.dispose();
+      if (floorTex) floorTex.dispose();
+      if (bloodTexturesCacheRef.current) {
+        bloodTexturesCacheRef.current.forEach((t) => t.dispose());
+        bloodTexturesCacheRef.current = null;
+      }
+
+      if (rendererRef.current) {
+        if (rendererRef.current.domElement) {
+          rendererRef.current.domElement.remove();
+        }
         try {
           rendererRef.current.dispose();
+          rendererRef.current.forceContextLoss();
         } catch {}
+        rendererRef.current = null;
       }
+
+      wallMeshesRef.current = [];
       itemMeshesRef.current.clear();
       enemyMeshesRef.current.clear();
       enemiesRef.current = [];
       projectilesRef.current = [];
+      decalsRef.current = [];
+      shellCasingsRef.current = [];
     };
-  }, [grid, rows, cols, isNightMode, createStoneBrickWallTexture, createCobblestoneFloorTexture, createMinotaurMeshGroup, createWeaponViewModel]);
+  }, [grid, rows, cols, isNightMode, createStoneBrickWallTexture, createCobblestoneFloorTexture, createMinotaurMeshGroup, createWeaponViewModel, disposeObject]);
 
   // Update Weapon Model on Weapon Change
   useEffect(() => {
     if (!cameraRef.current) return;
     if (weaponMeshRef.current) {
       cameraRef.current.remove(weaponMeshRef.current);
+      disposeObject(weaponMeshRef.current);
     }
     const newWeapon = createWeaponViewModel(playerState.currentWeapon);
     cameraRef.current.add(newWeapon);
     weaponMeshRef.current = newWeapon;
-  }, [playerState.currentWeapon, createWeaponViewModel]);
+  }, [playerState.currentWeapon, createWeaponViewModel, disposeObject]);
 
-  // Keyboard Event Handlers
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      keysDownRef.current[e.key.toLowerCase()] = true;
-      if (e.key === 'r' || e.key === 'R') handleReloadWeapon();
-      if (e.key === 'f' || e.key === 'F') setPlayerState((p) => ({ ...p, flashlightOn: !p.flashlightOn }));
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      keysDownRef.current[e.key.toLowerCase()] = false;
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
+  // Tactical Crouch and Dash Handlers
+  const handleToggleCrouch = useCallback(() => {
+    setIsCrouched((prev) => {
+      const next = !prev;
+      isCrouchedRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const handleDash = useCallback(() => {
+    const time = performance.now();
+    if (time - dashCooldownRef.current < 600) return;
+    if (playerStateRef.current.stamina < 25) return;
+
+    dashCooldownRef.current = time;
+    isDashingRef.current = true;
+    dashTimerRef.current = time + 250;
+    sound.playDash();
+
+    setPlayerState((p) => ({
+      ...p,
+      stamina: Math.max(0, p.stamina - 25),
+    }));
   }, []);
 
   // Reload Weapon
@@ -904,6 +1323,30 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
     }, wConfig.reloadTimeMs);
   }, []);
 
+  // Keyboard Event Handlers
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      keysDownRef.current[key] = true;
+      if (key === 'r') handleReloadWeapon();
+      if (key === 'f') setPlayerState((p) => ({ ...p, flashlightOn: !p.flashlightOn }));
+      if (key === 'c') handleToggleCrouch();
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handleDash();
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      keysDownRef.current[e.key.toLowerCase()] = false;
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [handleReloadWeapon, handleToggleCrouch, handleDash]);
+
   // Fire Weapon Handler
   const handleShoot = useCallback(() => {
     const now = performance.now();
@@ -919,6 +1362,11 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
     lastShotTimeRef.current = now;
 
     sound.playGunshot(wConfig.soundType);
+
+    // Eject Brass Shell Casing
+    if (currState.currentWeapon !== 'grenade_launcher' && currState.currentWeapon !== 'rocket_launcher') {
+      spawnShellCasing();
+    }
 
     // Screen Shake Recoil
     const recoilShake = wConfig.damage > 80 ? 0.35 : 0.15;
@@ -1020,6 +1468,9 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
       targetEnemy.hp -= wConfig.damage;
       sound.playMonsterHit();
 
+      // Render temporary blood splash decals on nearby floor and stone walls
+      spawnBloodDecals(targetEnemy.x, 1.0, targetEnemy.z, 3, targetEnemy.hp <= 0);
+
       setHitMarker(true);
       setTimeout(() => setHitMarker(false), 120);
 
@@ -1055,11 +1506,16 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
         setTimeout(() => setCoinPopup(null), 1200);
 
         if (eMesh) {
-          eMesh.visible = false;
+          sceneRef.current?.remove(eMesh);
+          disposeObject(eMesh);
+          enemyMeshesRef.current.delete(targetEnemy.id);
         }
       }
     }
-  }, [handleReloadWeapon]);
+  }, [handleReloadWeapon, spawnBloodDecals, spawnShellCasing, disposeObject]);
+
+  useEffect(() => { handleShootRef.current = handleShoot; }, [handleShoot]);
+  useEffect(() => { spawnBloodDecalsRef.current = spawnBloodDecals; }, [spawnBloodDecals]);
 
   // Desktop Mouse Look & Pointer Lock Handler
   useEffect(() => {
@@ -1201,10 +1657,10 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
 
       // Handle Automatic Continuous Shooting
       if (isShootingRef.current && WEAPONS[playerStateRef.current.currentWeapon].isAutomatic) {
-        handleShoot();
+        handleShootRef.current();
       }
 
-      if (!isPaused && !showLevelMapPreview && !isArmoryOpen && !isGameOverRef.current && cameraRef.current) {
+      if (!isPausedRef.current && !showLevelMapPreviewRef.current && !isArmoryOpenRef.current && !isGameOverRef.current && cameraRef.current) {
         const camera = cameraRef.current;
 
         // 1. Camera Look Rotation & Screen Shake
@@ -1234,6 +1690,10 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
         );
         camera.quaternion.setFromEuler(euler);
 
+        // Camera height lerp for stealth crouch
+        const targetCamY = isCrouchedRef.current ? 0.60 : 1.15;
+        camera.position.y += (targetCamY - camera.position.y) * Math.min(1.0, delta * 12);
+
         // 2. CS-Style Wall Path Movement & Collision
         let moveX = 0;
         let moveZ = 0;
@@ -1247,8 +1707,38 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
         moveZ += moveJoystickRef.current.y;
 
         if (moveX !== 0 || moveZ !== 0) {
-          const isSprinting = keysDownRef.current['shift'];
-          const moveSpeed = (isSprinting ? 4.2 : 2.8) * (activePowerUps.speedBoostRemaining > 0 ? 1.5 : 1.0);
+          const isSprinting = keysDownRef.current['shift'] && !isCrouchedRef.current && playerStateRef.current.stamina > 2;
+          let moveSpeed = 2.8;
+
+          if (isCrouchedRef.current) {
+            moveSpeed = 1.6; // Quiet stealth walk
+          } else if (isSprinting) {
+            moveSpeed = 5.0; // Sprint speed
+          }
+
+          if (activePowerUpsRef.current.speedBoostRemaining > 0) moveSpeed *= 1.5;
+
+          // Check dash speed burst
+          if (isDashingRef.current) {
+            if (time < dashTimerRef.current) {
+              moveSpeed *= 2.5;
+            } else {
+              isDashingRef.current = false;
+            }
+          }
+
+          // Stamina Management
+          if (isSprinting) {
+            const newStam = Math.max(0, playerStateRef.current.stamina - delta * 30);
+            playerStateRef.current.stamina = newStam;
+            if (newStam < 20 && time - lastBreathingTimeRef.current > 2200) {
+              lastBreathingTimeRef.current = time;
+              sound.playBreathing();
+            }
+          } else {
+            const newStam = Math.min(100, playerStateRef.current.stamina + delta * 22);
+            playerStateRef.current.stamina = newStam;
+          }
 
           const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, cameraYawRef.current, 0));
           const right = new THREE.Vector3(1, 0, 0).applyEuler(new THREE.Euler(0, cameraYawRef.current, 0));
@@ -1260,7 +1750,7 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
             .multiplyScalar(moveSpeed * delta);
 
           const tileSize = 3.0;
-          const isGhost = activePowerUps.ghostModeRemaining > 0;
+          const isGhost = activePowerUpsRef.current.ghostModeRemaining > 0;
 
           // Try X Step
           const nextX = camera.position.x + moveVec.x;
@@ -1310,6 +1800,20 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
             weaponMeshRef.current.position.y = basePos.y + weaponSwayYRef.current + bobY;
             weaponMeshRef.current.rotation.z = -weaponSwayXRef.current * 1.5;
             weaponMeshRef.current.rotation.y = weaponSwayXRef.current * 0.8;
+
+            // Rhythmic Footstep Audio
+            if (isMoving) {
+              const speedRatio = moveSpeed / 2.8;
+              const isCrouched = isCrouchedRef.current;
+              const stepCadence = Math.max(0.18, 0.38 / speedRatio);
+              footstepTimerRef.current += delta;
+              if (footstepTimerRef.current >= stepCadence) {
+                footstepTimerRef.current = 0;
+                sound.playFootstep(speedRatio, isCrouched);
+              }
+            } else {
+              footstepTimerRef.current = 0.32;
+            }
           }
         }
 
@@ -1322,15 +1826,23 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
           for (const enemy of enemiesRef.current) {
             if (enemy.hp <= 0 || enemy.isDying) continue;
             const dist = Math.hypot(cameraRef.current.position.x - enemy.x, cameraRef.current.position.z - enemy.z);
-            if (dist > 22) continue;
+            if (dist > 25) continue;
 
-            const eDir = new THREE.Vector3(enemy.x, 0.8, enemy.z).sub(cameraRef.current.position).normalize();
-            if (cameraDir.dot(eDir) > 0.93) {
-              hovering = true;
-              break;
+            // Check alignment across enemy body heights (waist, chest, head)
+            const targetHeights = [0.4, 0.8, 1.2, 1.5];
+            for (const py of targetHeights) {
+              const eDir = new THREE.Vector3(enemy.x, py, enemy.z).sub(cameraRef.current.position).normalize();
+              if (cameraDir.dot(eDir) > 0.925) {
+                hovering = true;
+                break;
+              }
             }
+            if (hovering) break;
           }
-          setIsHoveringEnemy(hovering);
+          if (isHoveringEnemyRef.current !== hovering) {
+            isHoveringEnemyRef.current = hovering;
+            setIsHoveringEnemy(hovering);
+          }
         }
 
         // 3. Item Pickups Check
@@ -1354,13 +1866,13 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
             const mesh = itemMeshesRef.current.get(`coin_${pR}_${pC}`);
             if (mesh) mesh.visible = false;
           } else if (cell.item === 'door' || (pR === rows - 1 && pC === cols - 1)) {
-            if (keysCollected >= totalKeysRequired && !isGameOverRef.current) {
+            if (keysCollectedRef.current >= totalKeysRequired && !isGameOverRef.current) {
               isGameOverRef.current = true;
               sound.playWin();
-              const finalTime = timeElapsed;
-              const finalBonus = keysCollected * 20;
+              const finalTime = timeElapsedRef.current;
+              const finalBonus = keysCollectedRef.current * 20;
               setTimeout(() => {
-                onWin(finalTime, finalBonus, 3);
+                onWinRef.current(finalTime, finalBonus, 3);
               }, 0);
             }
           }
@@ -1392,17 +1904,33 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
                 const dist = Math.hypot(p.mesh.position.x - enemy.x, p.mesh.position.z - enemy.z);
                 if (dist <= p.radius) {
                   enemy.hp -= p.damage;
+                  spawnBloodDecalsRef.current(enemy.x, 1.0, enemy.z, 4, enemy.hp <= 0);
                   if (enemy.hp <= 0 && !enemy.isDying) {
                     enemy.isDying = true;
                     enemy.state = 'dead';
                     const eMesh = enemyMeshesRef.current.get(enemy.id);
-                    if (eMesh) eMesh.visible = false;
+                    if (eMesh) {
+                      sceneRef.current?.remove(eMesh);
+                      disposeObject(eMesh);
+                      enemyMeshesRef.current.delete(enemy.id);
+                    }
                     setPlayerState((st) => ({ ...st, killsCount: st.killsCount + 1 }));
                     setPlayerCoins((c) => c + 35);
                   }
                 }
               });
 
+              p.mesh.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                  const m = child as THREE.Mesh;
+                  m.geometry?.dispose();
+                  if (Array.isArray(m.material)) {
+                    m.material.forEach((mat) => mat.dispose());
+                  } else {
+                    m.material?.dispose();
+                  }
+                }
+              });
               sceneRef.current?.remove(p.mesh);
             } else {
               nextProjs.push(p);
@@ -1411,7 +1939,10 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
           projectilesRef.current = nextProjs;
         }
 
-        // 5. Enemy AI Chase & Walk Animations
+        // 5. Enemy AI Chase, Patrol & Thriller Threat Alerts
+        let closestActiveDist = Infinity;
+        let closestActiveEnemy: Enemy3D | null = null;
+
         enemiesRef.current.forEach((enemy) => {
           if (enemy.hp <= 0) return;
 
@@ -1419,35 +1950,81 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
           if (!eMesh) return;
 
           const dist = Math.hypot(camera.position.x - enemy.x, camera.position.z - enemy.z);
+          if (dist < closestActiveDist) {
+            closestActiveDist = dist;
+            closestActiveEnemy = enemy;
+          }
 
-          if (dist < enemy.aggroDistance) {
-            const hasLOS = checkLineOfSight(enemy.x, enemy.z, camera.position.x, camera.position.z, grid, rows, cols);
-            if (hasLOS) {
+          // Stealth Crouch cuts detection range in half
+          const effectiveAggro = isCrouchedRef.current ? enemy.aggroDistance * 0.5 : enemy.aggroDistance;
+          const hasLOS = checkLineOfSight(enemy.x, enemy.z, camera.position.x, camera.position.z, grid, rows, cols);
+
+          if (dist < effectiveAggro && (hasLOS || dist < 3.0)) {
+            // Roar/Screech when first spotting player
+            if (enemy.state !== 'chasing') {
               enemy.state = 'chasing';
-              moveEnemyWithCollision(enemy, camera.position.x, camera.position.z, enemy.speed, delta, grid, rows, cols);
+              if (enemy.type === 'wraith_ghost') {
+                sound.playGhostScreech();
+              } else {
+                sound.playEnemyRoar();
+              }
+            }
+
+            const chaseSpeed = enemy.type === 'minotaur_beast' ? enemy.speed * 1.25 : enemy.speed;
+            moveEnemyWithCollision(enemy, camera.position.x, camera.position.z, chaseSpeed, delta, grid, rows, cols);
+            eMesh.position.x = enemy.x;
+            eMesh.position.z = enemy.z;
+            eMesh.lookAt(camera.position.x, eMesh.position.y, camera.position.z);
+
+            // Player Damage Collision
+            if (dist < 0.95 && time - enemy.lastAttackMs > 1000) {
+              enemy.lastAttackMs = time;
+              sound.playPlayerDamage();
+              shakeIntensityRef.current = 0.55;
+              setDamageFlash(true);
+              setTimeout(() => setDamageFlash(false), 200);
+
+              // Calculate directional hit angle
+              const dxHit = enemy.x - camera.position.x;
+              const dzHit = enemy.z - camera.position.z;
+              const enemyAngleHit = Math.atan2(dxHit, -dzHit);
+              let relAngleHit = enemyAngleHit - cameraYawRef.current;
+              while (relAngleHit > Math.PI) relAngleHit -= Math.PI * 2;
+              while (relAngleHit < -Math.PI) relAngleHit += Math.PI * 2;
+
+              let hitDir: 'AHEAD' | 'BEHIND' | 'LEFT' | 'RIGHT' = 'AHEAD';
+              if (Math.abs(relAngleHit) > (Math.PI * 3) / 4) hitDir = 'BEHIND';
+              else if (relAngleHit > Math.PI / 4) hitDir = 'RIGHT';
+              else if (relAngleHit < -Math.PI / 4) hitDir = 'LEFT';
+
+              setDamageDirection(hitDir);
+              setTimeout(() => setDamageDirection(null), 650);
+
+              const currentHp = playerStateRef.current.hp;
+              const nextHp = Math.max(0, currentHp - enemy.damage);
+              if (nextHp <= 0 && !isGameOverRef.current) {
+                isGameOverRef.current = true;
+                sound.playLose();
+                setTimeout(() => {
+                  onLoseRef.current();
+                }, 0);
+              }
+              setPlayerState((prev) => ({ ...prev, hp: nextHp }));
+            }
+          } else {
+            // Idle & Patrol Wandering logic
+            if (!enemy.patrolTimer || time > enemy.patrolTimer) {
+              enemy.patrolTimer = time + 3000 + Math.random() * 4000;
+              const randDirX = (Math.random() - 0.5) * 6;
+              const randDirZ = (Math.random() - 0.5) * 6;
+              enemy.patrolTarget = { x: enemy.x + randDirX, z: enemy.z + randDirZ };
+            }
+
+            if (enemy.patrolTarget) {
+              moveEnemyWithCollision(enemy, enemy.patrolTarget.x, enemy.patrolTarget.z, enemy.speed * 0.4, delta, grid, rows, cols);
               eMesh.position.x = enemy.x;
               eMesh.position.z = enemy.z;
-              eMesh.lookAt(camera.position.x, eMesh.position.y, camera.position.z);
-
-              // Player Damage Collision
-              if (dist < 0.95 && time - enemy.lastAttackMs > 1000) {
-                enemy.lastAttackMs = time;
-                sound.playPlayerDamage();
-                shakeIntensityRef.current = 0.45;
-                setDamageFlash(true);
-                setTimeout(() => setDamageFlash(false), 200);
-
-                const currentHp = playerStateRef.current.hp;
-                const nextHp = Math.max(0, currentHp - enemy.damage);
-                if (nextHp <= 0 && !isGameOverRef.current) {
-                  isGameOverRef.current = true;
-                  sound.playLose();
-                  setTimeout(() => {
-                    onLose();
-                  }, 0);
-                }
-                setPlayerState((prev) => ({ ...prev, hp: nextHp }));
-              }
+              eMesh.lookAt(enemy.patrolTarget.x, eMesh.position.y, enemy.patrolTarget.z);
             }
           }
 
@@ -1456,19 +2033,118 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
           eMesh.position.y = 0.1 + walkBob;
         });
 
+        // Suspense Threat Warning Calculation & Heartbeat Audio (Throttled update to avoid React re-render thrashing)
+        if (closestActiveEnemy && closestActiveDist < 9.5) {
+          const dx = closestActiveEnemy.x - camera.position.x;
+          const dz = closestActiveEnemy.z - camera.position.z;
+          const enemyAngle = Math.atan2(dx, -dz);
+          let relAngle = enemyAngle - cameraYawRef.current;
+          while (relAngle > Math.PI) relAngle -= Math.PI * 2;
+          while (relAngle < -Math.PI) relAngle += Math.PI * 2;
+
+          let dirText = 'AHEAD';
+          if (Math.abs(relAngle) > (Math.PI * 3) / 4) dirText = 'BEHIND';
+          else if (relAngle > Math.PI / 4) dirText = 'RIGHT';
+          else if (relAngle < -Math.PI / 4) dirText = 'LEFT';
+
+          const distMeters = Math.max(1, Math.round(closestActiveDist * 1.5));
+
+          if (time - lastThreatUpdateRef.current > 250) {
+            lastThreatUpdateRef.current = time;
+            setThreatAlert({
+              active: true,
+              distance: distMeters,
+              direction: dirText,
+              isChasing: closestActiveEnemy.state === 'chasing',
+            });
+          }
+
+          // Play suspense heartbeat sound
+          const heartbeatInterval = closestActiveDist < 4.0 ? 380 : 750;
+          if (time - lastHeartbeatTimeRef.current > heartbeatInterval) {
+            lastHeartbeatTimeRef.current = time;
+            sound.playHeartbeat(closestActiveDist < 4.0 ? 1.6 : 1.0);
+          }
+        } else {
+          if (time - lastThreatUpdateRef.current > 250) {
+            lastThreatUpdateRef.current = time;
+            setThreatAlert(null);
+          }
+        }
+
         // 6. Flashlight & Point Lights
         const currentState = playerStateRef.current;
         if (currentState.flashlightOn && currentState.flashlightBattery > 0) {
-          const drainedBattery = Math.max(0, currentState.flashlightBattery - delta * 0.8);
-          if (Math.abs(drainedBattery - currentState.flashlightBattery) > 0.05) {
+          const oldBattery = currentState.flashlightBattery;
+          const drainedBattery = Math.max(0, oldBattery - delta * 0.8);
+          currentState.flashlightBattery = drainedBattery;
+
+          if (Math.floor(oldBattery) !== Math.floor(drainedBattery) || drainedBattery === 0) {
             setPlayerState((p) => ({ ...p, flashlightBattery: drainedBattery }));
           }
+
           if (playerPointLightRef.current) playerPointLightRef.current.visible = true;
           if (flashlightRef.current) flashlightRef.current.visible = true;
         } else {
           if (playerPointLightRef.current) playerPointLightRef.current.visible = false;
           if (flashlightRef.current) flashlightRef.current.visible = false;
         }
+      }
+
+      // Update Blood Decals Fading & Lifespan Pruning
+      if (decalsRef.current.length > 0 && sceneRef.current) {
+        const now = performance.now();
+        const nextDecals: BloodDecal[] = [];
+
+        decalsRef.current.forEach((decal) => {
+          const age = now - decal.createdAt;
+          if (age >= decal.lifespanMs) {
+            sceneRef.current?.remove(decal.mesh);
+            disposeObject(decal.mesh);
+          } else {
+            if (age > decal.fadeStartMs) {
+              const fadeProgress = (age - decal.fadeStartMs) / (decal.lifespanMs - decal.fadeStartMs);
+              const mat = decal.mesh.material as THREE.MeshBasicMaterial;
+              mat.opacity = Math.max(0, (1 - fadeProgress) * 0.95);
+            }
+            nextDecals.push(decal);
+          }
+        });
+
+        decalsRef.current = nextDecals;
+      }
+
+      // Update 3D Ejected Shell Casings Physics
+      if (shellCasingsRef.current.length > 0 && sceneRef.current) {
+        const now = performance.now();
+        const nextCasings: ShellCasing[] = [];
+
+        shellCasingsRef.current.forEach((casing) => {
+          const age = now - casing.createdAt;
+          if (age > 4000) {
+            sceneRef.current?.remove(casing.mesh);
+            disposeObject(casing.mesh);
+          } else {
+            if (casing.mesh.position.y > 0.03) {
+              casing.velocity.y -= 9.8 * delta;
+              casing.mesh.position.addScaledVector(casing.velocity, delta);
+              casing.mesh.rotation.x += casing.rotVelocity.x * delta;
+              casing.mesh.rotation.y += casing.rotVelocity.y * delta;
+              casing.mesh.rotation.z += casing.rotVelocity.z * delta;
+
+              if (casing.mesh.position.y <= 0.03) {
+                casing.mesh.position.y = 0.03;
+                casing.velocity.y = -casing.velocity.y * 0.35;
+                casing.velocity.x *= 0.5;
+                casing.velocity.z *= 0.5;
+                casing.rotVelocity.multiplyScalar(0.4);
+              }
+            }
+            nextCasings.push(casing);
+          }
+        });
+
+        shellCasingsRef.current = nextCasings;
       }
 
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
@@ -1480,7 +2156,7 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
 
     animId = requestAnimationFrame(gameLoop);
     return () => cancelAnimationFrame(animId);
-  }, [isPaused, showLevelMapPreview, isArmoryOpen, handleShoot, keysCollected, totalKeysRequired, rows, cols, timeElapsed, onWin, onLose, activePowerUps, grid]);
+  }, [grid, rows, cols, totalKeysRequired]);
 
   // Level Timer Tick
   useEffect(() => {
@@ -1509,40 +2185,42 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
       cameraYawRef.current = 0;
       cameraPitchRef.current = 0;
     }
+
+    if (sceneRef.current) {
+      decalsRef.current.forEach((d) => {
+        sceneRef.current?.remove(d.mesh);
+        disposeObject(d.mesh);
+      });
+      shellCasingsRef.current.forEach((c) => {
+        sceneRef.current?.remove(c.mesh);
+        disposeObject(c.mesh);
+      });
+    }
+    decalsRef.current = [];
+    shellCasingsRef.current = [];
   };
 
-  // Touch handlers for GTA Touch Analog Joystick
+  // Touch handlers for Dynamic Movable Analog Joystick (Left Side of Screen)
   const handleJoystickTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (joystickTouchIdRef.current !== null) return;
     const touch = e.changedTouches[0];
-    const rect = e.currentTarget.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
     joystickTouchIdRef.current = touch.identifier;
 
-    const dx = touch.clientX - centerX;
-    const dy = touch.clientY - centerY;
-    const maxRadius = 45;
-    const angle = Math.atan2(dy, dx);
-    const dist = Math.min(Math.hypot(dx, dy), maxRadius);
-
-    const kX = Math.cos(angle) * dist;
-    const kY = Math.sin(angle) * dist;
-
-    setJoystickKnob({ x: kX, y: kY });
-    moveJoystickRef.current = { x: kX / maxRadius, y: kY / maxRadius };
+    const originPos = { x: touch.clientX, y: touch.clientY };
+    joystickOriginRef.current = originPos;
+    setJoystickOrigin(originPos);
+    setJoystickKnob({ x: 0, y: 0 });
+    moveJoystickRef.current = { x: 0, y: 0 };
   };
 
   const handleJoystickTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (joystickTouchIdRef.current === null) return;
+    if (joystickTouchIdRef.current === null || !joystickOriginRef.current) return;
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       if (touch.identifier === joystickTouchIdRef.current) {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-
-        const dx = touch.clientX - centerX;
-        const dy = touch.clientY - centerY;
+        const origin = joystickOriginRef.current;
+        const dx = touch.clientX - origin.x;
+        const dy = touch.clientY - origin.y;
         const dist = Math.hypot(dx, dy);
         const maxRadius = 45;
         const angle = Math.atan2(dy, dx);
@@ -1553,16 +2231,21 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
 
         setJoystickKnob({ x: kX, y: kY });
         moveJoystickRef.current = { x: kX / maxRadius, y: kY / maxRadius };
+        break;
       }
     }
   };
 
   const handleJoystickTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (joystickTouchIdRef.current === null) return;
     for (let i = 0; i < e.changedTouches.length; i++) {
       if (e.changedTouches[i].identifier === joystickTouchIdRef.current) {
         joystickTouchIdRef.current = null;
+        joystickOriginRef.current = null;
+        setJoystickOrigin(null);
         setJoystickKnob({ x: 0, y: 0 });
         moveJoystickRef.current = { x: 0, y: 0 };
+        break;
       }
     }
   };
@@ -1613,7 +2296,39 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
       />
 
       {/* Red Damage Flash */}
-      {damageFlash && <div className="absolute inset-0 bg-red-600/30 pointer-events-none z-30" />}
+      {damageFlash && <div className="absolute inset-0 bg-red-600/35 pointer-events-none z-30" />}
+
+      {/* CRITICAL LOW HEALTH BLOOD VIGNETTE */}
+      {playerState.hp <= 35 && playerState.hp > 0 && (
+        <div className="absolute inset-0 pointer-events-none z-20 border-[16px] border-red-600/50 shadow-[inset_0_0_100px_rgba(220,38,38,0.85)] animate-pulse" />
+      )}
+
+      {/* DIRECTIONAL DAMAGE INDICATOR ARCS */}
+      {damageDirection === 'AHEAD' && (
+        <div className="absolute top-0 inset-x-0 h-20 bg-gradient-to-b from-red-600/80 via-red-600/40 to-transparent pointer-events-none z-30 shadow-[0_15px_30px_rgba(239,68,68,0.9)] animate-pulse" />
+      )}
+      {damageDirection === 'BEHIND' && (
+        <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-red-600/80 via-red-600/40 to-transparent pointer-events-none z-30 shadow-[0_-15px_30px_rgba(239,68,68,0.9)] animate-pulse" />
+      )}
+      {damageDirection === 'LEFT' && (
+        <div className="absolute left-0 inset-y-0 w-20 bg-gradient-to-r from-red-600/80 via-red-600/40 to-transparent pointer-events-none z-30 shadow-[15px_0_30px_rgba(239,68,68,0.9)] animate-pulse" />
+      )}
+      {damageDirection === 'RIGHT' && (
+        <div className="absolute right-0 inset-y-0 w-20 bg-gradient-to-l from-red-600/80 via-red-600/40 to-transparent pointer-events-none z-30 shadow-[-15px_0_30px_rgba(239,68,68,0.9)] animate-pulse" />
+      )}
+
+      {/* THRILLER RED VIGNETTE & PULSING BORDER WHEN ENEMY APPROACHES */}
+      {threatAlert && threatAlert.active && (
+        <div className="absolute inset-0 z-10 pointer-events-none border-8 border-red-600/40 shadow-[inset_0_0_90px_rgba(239,68,68,0.6)] animate-pulse transition-all duration-300" />
+      )}
+
+      {/* THRILLER SUSPENSE WARNING BANNER */}
+      {threatAlert && threatAlert.active && (
+        <div className="absolute top-10 sm:top-12 left-1/2 -translate-x-1/2 z-30 pointer-events-none flex items-center gap-1.5 bg-red-950/90 border border-red-500/80 text-red-100 px-2.5 py-1 rounded-full shadow-[0_0_15px_rgba(239,68,68,0.6)] font-mono text-[10px] font-bold tracking-wider uppercase backdrop-blur-md">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
+          <span>⚠️ {threatAlert.distance}M [{threatAlert.direction}]</span>
+        </div>
+      )}
 
       {/* Coin Earned Popup Notification */}
       {coinPopup && (
@@ -1629,19 +2344,31 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
 
       {/* TACTICAL CROSSHAIR & HITMARKER OVERLAY */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
-        <div className={`relative flex items-center justify-center transition-transform duration-75 ${
+        <div className={`relative flex items-center justify-center transition-all duration-75 ${
           muzzleFlashScreen ? 'scale-125' : 'scale-100'
         }`}>
+          {/* Target Lock Ring on Hover */}
+          {isHoveringEnemy && (
+            <div className="absolute w-8 h-8 rounded-full border-2 border-red-500/90 shadow-[0_0_15px_rgba(239,68,68,0.8)] animate-pulse" />
+          )}
+
           {/* Center Dot */}
-          <div className={`w-1.5 h-1.5 rounded-full transition-colors ${
-            isHoveringEnemy ? 'bg-red-500 shadow-[0_0_8px_#ef4444]' : 'bg-amber-400 shadow-[0_0_6px_#f59e0b]'
+          <div className={`w-1.5 h-1.5 rounded-full transition-all duration-75 ${
+            isHoveringEnemy ? 'bg-red-500 shadow-[0_0_12px_#ef4444] scale-125' : 'bg-amber-400 shadow-[0_0_6px_#f59e0b]'
           }`} />
 
           {/* Reticle Ticks */}
-          <div className={`absolute -top-3.5 w-0.5 h-2.5 transition-colors ${isHoveringEnemy ? 'bg-red-500' : 'bg-amber-400/80'}`} />
-          <div className={`absolute -bottom-3.5 w-0.5 h-2.5 transition-colors ${isHoveringEnemy ? 'bg-red-500' : 'bg-amber-400/80'}`} />
-          <div className={`absolute -left-3.5 h-0.5 w-2.5 transition-colors ${isHoveringEnemy ? 'bg-red-500' : 'bg-amber-400/80'}`} />
-          <div className={`absolute -right-3.5 h-0.5 w-2.5 transition-colors ${isHoveringEnemy ? 'bg-red-500' : 'bg-amber-400/80'}`} />
+          <div className={`absolute -top-3.5 h-2.5 transition-all duration-75 ${isHoveringEnemy ? 'bg-red-500 w-1 shadow-[0_0_8px_#ef4444]' : 'bg-amber-400/80 w-0.5'}`} />
+          <div className={`absolute -bottom-3.5 h-2.5 transition-all duration-75 ${isHoveringEnemy ? 'bg-red-500 w-1 shadow-[0_0_8px_#ef4444]' : 'bg-amber-400/80 w-0.5'}`} />
+          <div className={`absolute -left-3.5 w-2.5 transition-all duration-75 ${isHoveringEnemy ? 'bg-red-500 h-1 shadow-[0_0_8px_#ef4444]' : 'bg-amber-400/80 h-0.5'}`} />
+          <div className={`absolute -right-3.5 w-2.5 transition-all duration-75 ${isHoveringEnemy ? 'bg-red-500 h-1 shadow-[0_0_8px_#ef4444]' : 'bg-amber-400/80 h-0.5'}`} />
+
+          {/* Target Lock Indicator Text */}
+          {isHoveringEnemy && (
+            <div className="absolute -top-7 text-[9px] font-mono font-extrabold text-red-500 tracking-widest uppercase bg-red-950/90 border border-red-500/80 px-1.5 py-0.5 rounded backdrop-blur-sm shadow-[0_0_10px_rgba(239,68,68,0.6)] animate-bounce">
+              TARGET
+            </div>
+          )}
 
           {/* Animated Hit Marker 'X' */}
           {hitMarker && (
@@ -1654,32 +2381,198 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
         </div>
       </div>
 
-      {/* TOP LEFT HUD BAR: Health, Keys, Coins */}
-      <div className="absolute top-3 left-3 z-20 flex items-center gap-2 pointer-events-auto">
-        <div className="flex items-center gap-2 bg-zinc-950/85 backdrop-blur-md border border-amber-500/40 px-3 py-1.5 rounded-xl shadow-2xl">
-          <Shield className="w-4 h-4 text-red-500" />
-          <div className="flex flex-col">
-            <span className="text-[10px] text-zinc-400 uppercase font-bold">Health</span>
-            <div className="w-20 sm:w-28 h-2 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800">
-              <div className="h-full bg-gradient-to-r from-red-600 to-amber-500 transition-all duration-300" style={{ width: `${playerState.hp}%` }} />
-            </div>
+      {/* DYNAMIC MOVABLE JOYSTICK TOUCH ZONE (LEFT HALF OF SCREEN) */}
+      <div
+        onTouchStart={handleJoystickTouchStart}
+        onTouchMove={handleJoystickTouchMove}
+        onTouchEnd={handleJoystickTouchEnd}
+        onTouchCancel={handleJoystickTouchEnd}
+        className="absolute inset-y-0 left-0 w-1/2 z-20 touch-none pointer-events-auto"
+      >
+        {!joystickOrigin && (
+          <div className="absolute bottom-20 left-4 sm:left-6 pointer-events-none opacity-60 text-[10px] font-mono uppercase tracking-widest text-amber-300 flex items-center gap-1.5 bg-zinc-950/80 px-3 py-1.5 rounded-full border border-amber-500/30 backdrop-blur-md shadow-lg animate-pulse">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+            <span>TOUCH LEFT SIDE TO MOVE</span>
           </div>
-          <span className="text-xs font-bold text-red-400">{playerState.hp}</span>
+        )}
+
+        {joystickOrigin && (
+          <div
+            className="fixed w-24 h-24 sm:w-28 sm:h-28 rounded-full border-2 border-amber-400/80 bg-zinc-950/80 backdrop-blur-md flex items-center justify-center shadow-[0_0_30px_rgba(245,158,11,0.5)] pointer-events-none transform -translate-x-1/2 -translate-y-1/2 z-30"
+            style={{ left: joystickOrigin.x, top: joystickOrigin.y }}
+          >
+            <div className="w-3 h-3 rounded-full bg-amber-500/40" />
+            <div
+              className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 border-2 border-amber-200 shadow-xl absolute transition-transform duration-75"
+              style={{ transform: `translate(${joystickKnob.x}px, ${joystickKnob.y}px)` }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* TOP LEFT HUD & QUICK WEAPON SELECTOR CONTAINER */}
+      <div className="absolute top-2 left-2 sm:top-3 sm:left-3 z-30 flex flex-col gap-1.5 max-w-[65vw] sm:max-w-none pointer-events-auto">
+        {/* Status Indicators: Health, Stamina, Keys, Coins */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Health */}
+          <div className="flex items-center gap-1.5 bg-zinc-950/95 backdrop-blur-md border border-red-500/50 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl shadow-2xl">
+            <Heart className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500 fill-red-500/30 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)] shrink-0" />
+            <div className="flex flex-col">
+              <div className="w-10 sm:w-16 h-1.5 sm:h-2 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800">
+                <div className="h-full bg-gradient-to-r from-red-600 via-rose-500 to-amber-400 transition-all duration-300 drop-shadow-[0_0_4px_rgba(239,68,68,0.8)]" style={{ width: `${playerState.hp}%` }} />
+              </div>
+            </div>
+            <span className="text-[11px] sm:text-xs font-black text-red-400 font-mono drop-shadow">{playerState.hp}</span>
+          </div>
+
+          {/* Stamina */}
+          <div className="flex items-center gap-1.5 bg-zinc-950/95 backdrop-blur-md border border-cyan-500/50 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl shadow-2xl">
+            <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400 fill-cyan-400/20 drop-shadow-[0_0_6px_rgba(6,182,212,0.8)] shrink-0" />
+            <div className="flex flex-col">
+              <div className="w-10 sm:w-16 h-1.5 sm:h-2 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800">
+                <div className="h-full bg-gradient-to-r from-cyan-500 to-blue-400 transition-all duration-150 drop-shadow-[0_0_4px_rgba(6,182,212,0.8)]" style={{ width: `${Math.round(playerState.stamina)}%` }} />
+              </div>
+            </div>
+            <span className="text-[11px] sm:text-xs font-black text-cyan-300 font-mono drop-shadow">{Math.round(playerState.stamina)}%</span>
+          </div>
+
+          {/* Keys */}
+          <div className="flex items-center gap-1.5 bg-zinc-950/95 backdrop-blur-md border border-amber-500/50 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl text-[11px] sm:text-xs shadow-2xl">
+            <Key className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.8)] shrink-0" />
+            <span className="text-amber-300 font-extrabold font-mono drop-shadow">{keysCollected}/{totalKeysRequired}</span>
+          </div>
+
+          {/* Coins */}
+          <div className="flex items-center gap-1.5 bg-zinc-950/95 backdrop-blur-md border border-yellow-500/60 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-extrabold text-yellow-300 shadow-2xl">
+            <Coins className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-yellow-400 drop-shadow-[0_0_6px_rgba(234,179,8,0.8)] shrink-0" />
+            <span className="font-mono drop-shadow">{playerCoins}</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-zinc-950/85 backdrop-blur-md border border-cyan-500/40 px-3 py-1.5 rounded-xl text-xs">
-          <Key className="w-4 h-4 text-amber-400" />
-          <span className="text-amber-300 font-bold">{keysCollected}/{totalKeysRequired}</span>
-        </div>
-
-        <div className="flex items-center gap-1.5 bg-zinc-950/85 backdrop-blur-md border border-amber-500/50 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-400 shadow-xl">
-          <span className="text-sm">✧</span>
-          <span>{playerCoins}</span>
+        {/* Quick Weapon Selection Bar */}
+        <div className="flex items-center gap-1 overflow-x-auto max-w-[65vw] sm:max-w-none py-0.5 select-none">
+          {unlockedWeapons.map((wId) => {
+            const isSelected = playerState.currentWeapon === wId;
+            const config = WEAPONS[wId];
+            return (
+              <button
+                key={wId}
+                onClick={() => {
+                  sound.playClick();
+                  setPlayerState((p) => ({
+                    ...p,
+                    currentWeapon: wId,
+                    ammoInClip: config.maxClip,
+                  }));
+                }}
+                className={`px-2 py-1 rounded-lg border text-[10px] sm:text-xs font-mono font-bold flex items-center gap-1 shrink-0 transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-amber-500 text-zinc-950 border-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.5)]'
+                    : 'bg-zinc-950/90 text-zinc-300 border-zinc-800 hover:border-amber-500/50 hover:bg-zinc-900'
+                }`}
+              >
+                <span className="text-xs sm:text-sm flex items-center justify-center leading-none">{config.icon}</span>
+                <span className="hidden sm:inline">{config.name.split(' ')[0]}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* TOP RIGHT CORNER: MINI-MAP & ACTIONS HEADER */}
-      <div className="absolute top-3 right-3 z-20 flex flex-col items-end gap-2 pointer-events-auto">
+      <div className="absolute top-2 right-2 sm:top-3 sm:right-3 z-30 flex flex-col items-end gap-1.5 pointer-events-auto">
+        <div className="flex items-center gap-1 bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-1 rounded-xl shadow-xl flex-wrap justify-end">
+          {onSkipLevelWithAds && (
+            <button
+              onClick={onSkipLevelWithAds}
+              title="Watch 2 ads to skip current level"
+              className="px-2 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-zinc-950 font-bold text-[10px] sm:text-xs flex items-center gap-1 active:scale-95 transition shadow-md cursor-pointer"
+            >
+              <Sparkles className="w-3 h-3 fill-zinc-950" />
+              <span>{skipLevelAdCount === 1 ? 'Skip (1/2)' : 'Skip (2 Ads)'}</span>
+            </button>
+          )}
+
+          {/* WEAPONS ARMORY STORE BUTTON */}
+          <button
+            onClick={() => {
+              setIsArmoryOpen(true);
+              setIsSettingsMenuOpen(false);
+            }}
+            title="Open Guns Armory Store"
+            className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-[10px] sm:text-xs flex items-center gap-1 active:scale-95 transition shadow-md cursor-pointer"
+          >
+            <ShoppingBag className="w-3.5 h-3.5 text-zinc-950" />
+            <span className="hidden xs:inline">ARMORY</span>
+          </button>
+
+          {/* SETTINGS MENU TOGGLE BUTTON */}
+          <button
+            onClick={() => setIsSettingsMenuOpen((prev) => !prev)}
+            title="Settings & Menu"
+            className={`p-1.5 sm:p-2 rounded-lg border transition cursor-pointer active:scale-95 flex items-center gap-1 ${
+              isSettingsMenuOpen
+                ? 'bg-amber-500 text-zinc-950 border-amber-400 shadow-md'
+                : 'bg-zinc-900 hover:bg-zinc-800 text-cyan-400 border-zinc-800'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </button>
+        </div>
+
+        {/* SETTINGS DROPDOWN MENU */}
+        {isSettingsMenuOpen && (
+          <div className="bg-zinc-950/95 border border-amber-500/30 shadow-2xl backdrop-blur-xl rounded-xl p-1.5 w-48 flex flex-col gap-1 z-40 animate-in fade-in zoom-in-95 duration-150">
+            <button
+              onClick={() => {
+                setIsNightMode((prev) => !prev);
+                setIsSettingsMenuOpen(false);
+              }}
+              className="w-full px-3 py-2 rounded-lg bg-zinc-900/80 hover:bg-zinc-800/80 text-amber-300 font-bold text-xs flex items-center gap-2.5 transition active:scale-95 cursor-pointer text-left"
+            >
+              {isNightMode ? <Moon className="w-4 h-4 text-blue-400" /> : <Sun className="w-4 h-4 text-amber-400" />}
+              <span>{isNightMode ? 'Switch to Day' : 'Switch to Night'}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                handleRestartLevel();
+                setIsSettingsMenuOpen(false);
+              }}
+              className="w-full px-3 py-2 rounded-lg bg-zinc-900/80 hover:bg-zinc-800/80 text-amber-400 font-bold text-xs flex items-center gap-2.5 transition active:scale-95 cursor-pointer text-left"
+            >
+              <RotateCcw className="w-4 h-4 text-amber-400" />
+              <span>Restart Level</span>
+            </button>
+
+            {onOpenSettings && (
+              <button
+                onClick={() => {
+                  onOpenSettings();
+                  setIsSettingsMenuOpen(false);
+                }}
+                className="w-full px-3 py-2 rounded-lg bg-zinc-900/80 hover:bg-zinc-800/80 text-cyan-300 font-bold text-xs flex items-center gap-2.5 transition active:scale-95 cursor-pointer text-left"
+              >
+                <Settings className="w-4 h-4 text-cyan-400" />
+                <span>Game Settings</span>
+              </button>
+            )}
+
+            <div className="h-px bg-zinc-800/80 my-0.5" />
+
+            <button
+              onClick={() => {
+                onBackToMenu();
+                setIsSettingsMenuOpen(false);
+              }}
+              className="w-full px-3 py-2 rounded-lg bg-red-950/40 hover:bg-red-950/80 text-red-400 font-bold text-xs flex items-center gap-2.5 transition active:scale-95 cursor-pointer text-left border border-red-900/40"
+            >
+              <LogOut className="w-4 h-4 text-red-400" />
+              <span>Exit to Main Menu</span>
+            </button>
+          </div>
+        )}
+
         <MiniMapRadar
           grid={grid}
           rows={rows}
@@ -1689,131 +2582,63 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
           cameraYawRef={cameraYawRef}
           itemMeshesRef={itemMeshesRef}
           enemiesRef={enemiesRef}
-          size={120}
+          size={100}
         />
-
-        <div className="flex items-center gap-1.5 bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-1 rounded-xl shadow-xl">
-          {onSkipLevelWithAds && (
-            <button
-              onClick={onSkipLevelWithAds}
-              title="Watch 2 ads to skip current level"
-              className="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-zinc-950 font-bold text-xs flex items-center gap-1 active:scale-95 transition shadow-lg shadow-amber-500/20 cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5 fill-zinc-950" />
-              <span>{skipLevelAdCount === 1 ? 'Skip (1/2 Ads)' : 'Skip (2 Ads)'}</span>
-            </button>
-          )}
-
-          {/* WEAPONS ARMORY STORE BUTTON */}
-          <button
-            onClick={() => setIsArmoryOpen(true)}
-            title="Open Guns Armory Store"
-            className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs flex items-center gap-1 active:scale-95 transition shadow-lg shadow-amber-500/20"
-          >
-            <ShoppingBag className="w-3.5 h-3.5" />
-            <span>ARMORY</span>
-          </button>
-
-          <button
-            onClick={() => setIsNightMode((prev) => !prev)}
-            title={isNightMode ? 'Switch to Day' : 'Switch to Night'}
-            className="px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-amber-500/20 text-amber-300 border border-zinc-800 text-xs font-bold flex items-center gap-1 active:scale-95 transition"
-          >
-            {isNightMode ? <Moon className="w-3.5 h-3.5 text-blue-400" /> : <Sun className="w-3.5 h-3.5 text-amber-400" />}
-          </button>
-
-          <button
-            onClick={handleRestartLevel}
-            title="Restart Level"
-            className="p-2 rounded-lg bg-zinc-900 hover:bg-amber-500/20 text-amber-400 border border-zinc-800 active:scale-95 transition"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-
-          {onOpenSettings && (
-            <button
-              onClick={onOpenSettings}
-              title="Settings"
-              className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-cyan-400 border border-zinc-800 active:scale-95 transition"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-          )}
-
-          <button
-            onClick={onBackToMenu}
-            title="Exit Game"
-            className="p-2 rounded-lg bg-zinc-900 hover:bg-red-950/50 text-red-400 border border-zinc-800 active:scale-95 transition"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* QUICK WEAPON SELECTION WHEEL / BAR */}
-      <div className="absolute top-16 left-3 z-20 flex items-center gap-1.5 pointer-events-auto">
-        {unlockedWeapons.map((wId) => {
-          const isSelected = playerState.currentWeapon === wId;
-          const config = WEAPONS[wId];
-          return (
-            <button
-              key={wId}
-              onClick={() => {
-                sound.playClick();
-                setPlayerState((p) => ({
-                  ...p,
-                  currentWeapon: wId,
-                  ammoInClip: config.maxClip,
-                }));
-              }}
-              className={`px-2.5 py-1.5 rounded-xl border text-xs font-mono font-bold flex items-center gap-1 transition-all ${
-                isSelected
-                  ? 'bg-amber-500 text-zinc-950 border-amber-400 shadow-lg shadow-amber-500/30'
-                  : 'bg-zinc-950/80 text-zinc-300 border-zinc-800 hover:border-zinc-700'
-              }`}
-            >
-              <span>{config.icon}</span>
-              <span className="hidden sm:inline">{config.name.split(' ')[0]}</span>
-            </button>
-          );
-        })}
       </div>
 
       {/* BOTTOM WEAPON & AMMO HUD */}
-      <div className="absolute bottom-4 left-4 right-4 z-20 flex items-end justify-between pointer-events-auto">
-        <div className="bg-zinc-950/90 backdrop-blur-md border border-amber-500/40 p-3 rounded-2xl flex items-center gap-3 shadow-2xl">
-          <div className="text-2xl">{WEAPONS[playerState.currentWeapon].icon}</div>
-          <div className="flex flex-col">
-            <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+      <div className="absolute bottom-2 left-2 right-2 sm:bottom-4 sm:left-4 sm:right-4 z-30 flex items-end justify-between pointer-events-auto">
+        <div className="bg-zinc-950/95 backdrop-blur-md border border-amber-500/50 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl sm:rounded-2xl flex items-center gap-2 sm:gap-3 shadow-2xl">
+          {/* Small, Neat & Perfectly Placed Gun Icon Badge */}
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-[18px] sm:text-[20px] leading-none shrink-0 shadow-inner select-none">
+            {WEAPONS[playerState.currentWeapon].icon}
+          </div>
+
+          {/* Weapon Name & Small Clear Ammo Indicator */}
+          <div className="flex flex-col min-w-0">
+            <span className="text-[10px] sm:text-xs font-black text-amber-400 uppercase tracking-wider truncate leading-tight">
               {WEAPONS[playerState.currentWeapon].name}
             </span>
-            <div className="flex items-baseline gap-1 text-zinc-100 font-mono font-bold">
-              <span className="text-lg text-amber-300">{playerState.ammoInClip}</span>
-              <span className="text-xs text-zinc-500">/ {playerState.reserveAmmo} AMMO</span>
+            <div className="flex items-center gap-1.5 font-mono">
+              <CircleDot className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-400 fill-amber-400/40 drop-shadow-[0_0_4px_rgba(245,158,11,0.8)] shrink-0" />
+              <div className="flex items-baseline gap-1">
+                <span className="text-xs sm:text-sm font-black text-amber-300 drop-shadow-md">{playerState.ammoInClip}</span>
+                <span className="text-[10px] text-zinc-600 font-bold">/</span>
+                <span className="text-[10px] sm:text-xs font-extrabold text-zinc-400">{playerState.reserveAmmo}</span>
+              </div>
+            </div>
+            {/* Visual Mini Clip Bar */}
+            <div className="w-16 sm:w-20 h-1 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800 mt-0.5">
+              <div
+                className="h-full bg-gradient-to-r from-amber-500 to-yellow-300 transition-all duration-150"
+                style={{
+                  width: `${Math.min(100, Math.max(0, (playerState.ammoInClip / WEAPONS[playerState.currentWeapon].maxClip) * 100))}%`,
+                }}
+              />
             </div>
           </div>
+
+          {/* Compact Reload Button */}
           <button
             onClick={handleReloadWeapon}
             disabled={playerState.isReloading}
-            className="ml-2 p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs font-bold text-cyan-400 border border-cyan-500/30 flex items-center gap-1 active:scale-95"
+            className="ml-1 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg sm:rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-[10px] sm:text-xs font-extrabold text-cyan-400 border border-cyan-500/40 flex items-center gap-1 active:scale-95 transition cursor-pointer shadow-md"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${playerState.isReloading ? 'animate-spin' : ''}`} />
-            <span>RELOAD</span>
+            <RefreshCw className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${playerState.isReloading ? 'animate-spin' : ''}`} />
+            <span className="hidden xs:inline">RELOAD</span>
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* TACTICAL ACTION BUTTONS (STEALTH, DASH, FLASHLIGHT, FIRE) */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
           {/* Flashlight Battery */}
-          <div className="bg-zinc-950/90 backdrop-blur-md border border-amber-500/40 px-3 py-2 rounded-2xl flex items-center gap-2.5 shadow-2xl">
-            <Zap className={`w-4 h-4 ${playerState.flashlightBattery < 25 ? 'text-red-500 animate-pulse' : 'text-amber-400'}`} />
+          <div className="hidden xs:flex bg-zinc-950/95 backdrop-blur-md border border-amber-500/40 px-2.5 py-1.5 rounded-xl items-center gap-2 shadow-2xl">
+            <Zap className={`w-3.5 h-3.5 ${playerState.flashlightBattery < 25 ? 'text-red-500 animate-pulse' : 'text-amber-400'}`} />
             <div className="flex flex-col">
-              <div className="flex items-center justify-between gap-3 text-[10px] text-zinc-400 uppercase font-bold">
-                <span>Battery</span>
-                <span className={playerState.flashlightBattery < 25 ? 'text-red-400 font-bold animate-pulse' : 'text-amber-300'}>
-                  {Math.round(playerState.flashlightBattery)}%
-                </span>
+              <div className="flex items-center justify-between gap-2 text-[9px] text-zinc-400 uppercase font-bold">
+                <span>{Math.round(playerState.flashlightBattery)}%</span>
               </div>
-              <div className="w-16 sm:w-24 h-2 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800">
+              <div className="w-12 sm:w-16 h-1.5 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800">
                 <div
                   className={`h-full transition-all duration-300 ${
                     playerState.flashlightBattery < 25 ? 'bg-red-500' : 'bg-emerald-400'
@@ -1826,48 +2651,52 @@ export const FPSMaze3D: React.FC<FPSMaze3DProps> = ({
 
           <button
             onClick={() => setPlayerState((p) => ({ ...p, flashlightOn: !p.flashlightOn }))}
-            className={`p-3 rounded-2xl border backdrop-blur-md font-bold text-xs uppercase flex items-center gap-2 shadow-xl active:scale-95 transition ${
-              playerState.flashlightOn ? 'bg-amber-500/20 border-amber-400 text-amber-300' : 'bg-zinc-950/80 border-zinc-800 text-zinc-500'
+            title="Toggle Flashlight"
+            className={`p-2 sm:p-2.5 rounded-xl border backdrop-blur-md font-bold text-xs uppercase flex items-center justify-center shadow-xl active:scale-95 transition cursor-pointer ${
+              playerState.flashlightOn ? 'bg-amber-500/20 border-amber-400 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.4)]' : 'bg-zinc-950/80 border-zinc-800 text-zinc-500'
             }`}
           >
-            <Flame className="w-5 h-5 text-amber-400" />
+            <Flame className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
+          </button>
+
+          {/* Stealth Crouch Toggle */}
+          <button
+            onClick={handleToggleCrouch}
+            className={`px-2.5 py-2 sm:px-3 sm:py-2.5 rounded-xl border font-mono text-[10px] sm:text-xs font-extrabold uppercase shadow-xl transition active:scale-95 cursor-pointer flex items-center gap-1 ${
+              isCrouched ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'bg-zinc-950/90 border-zinc-700 text-zinc-300 hover:bg-zinc-800'
+            }`}
+          >
+            <Footprints className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-300 shrink-0" />
+            <span>{isCrouched ? 'STEALTH' : 'CROUCH'}</span>
+          </button>
+
+          {/* Sprint Dash Button */}
+          <button
+            onClick={handleDash}
+            className="px-2.5 py-2 sm:px-3 sm:py-2.5 rounded-xl border border-amber-500/50 bg-zinc-950/90 hover:bg-amber-500/20 text-amber-300 font-mono text-[10px] sm:text-xs font-extrabold uppercase shadow-xl transition active:scale-95 cursor-pointer flex items-center gap-1"
+          >
+            <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-300 shrink-0" />
+            <span>DASH</span>
+          </button>
+
+          {/* FIRE / SHOOT BUTTON */}
+          <button
+            onTouchStart={() => {
+              isShootingRef.current = true;
+              handleShoot();
+            }}
+            onTouchEnd={() => (isShootingRef.current = false)}
+            onMouseDown={() => {
+              isShootingRef.current = true;
+              handleShoot();
+            }}
+            onMouseUp={() => (isShootingRef.current = false)}
+            className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-gradient-to-r from-red-600 to-amber-500 border-2 border-red-400 text-zinc-950 flex flex-col items-center justify-center shadow-2xl active:scale-90 transition cursor-pointer"
+          >
+            <Target className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.5]" />
+            <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-widest leading-none">FIRE</span>
           </button>
         </div>
-      </div>
-
-      {/* GTA-STYLE TOUCH CONTROLS (360 JOYSTICK + FIRE TARGET BUTTON) */}
-      <div className="absolute inset-x-4 bottom-20 z-30 flex items-end justify-between pointer-events-auto">
-        <div
-          onTouchStart={handleJoystickTouchStart}
-          onTouchMove={handleJoystickTouchMove}
-          onTouchEnd={handleJoystickTouchEnd}
-          className="w-28 h-28 sm:w-32 sm:h-32 bg-zinc-950/85 backdrop-blur-md rounded-full border-2 border-amber-500/50 relative flex items-center justify-center shadow-2xl touch-none"
-        >
-          <div className="text-[9px] text-amber-400/60 font-bold uppercase tracking-widest pointer-events-none">
-            JOYSTICK
-          </div>
-          <div
-            className="w-12 h-12 rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 border-2 border-amber-200 shadow-xl absolute transition-transform duration-75"
-            style={{ transform: `translate(${joystickKnob.x}px, ${joystickKnob.y}px)` }}
-          />
-        </div>
-
-        <button
-          onTouchStart={() => {
-            isShootingRef.current = true;
-            handleShoot();
-          }}
-          onTouchEnd={() => (isShootingRef.current = false)}
-          onMouseDown={() => {
-            isShootingRef.current = true;
-            handleShoot();
-          }}
-          onMouseUp={() => (isShootingRef.current = false)}
-          className="w-20 h-20 rounded-full bg-gradient-to-r from-red-600 to-amber-500 border-2 border-red-400 text-zinc-950 flex flex-col items-center justify-center shadow-2xl active:scale-90 transition cursor-pointer"
-        >
-          <Target className="w-8 h-8 stroke-[2.5]" />
-          <span className="text-[10px] font-extrabold uppercase tracking-widest">FIRE</span>
-        </button>
       </div>
 
       {/* WEAPONS ARMORY IN-GAME STORE MODAL */}

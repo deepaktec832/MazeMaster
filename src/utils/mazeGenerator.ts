@@ -1,18 +1,43 @@
 import { Cell, Difficulty, GameMode, ItemType, Position } from '../types/maze';
 
-export function getGridDimensions(difficulty: Difficulty): { rows: number; cols: number } {
+export function getGridDimensions(difficulty: Difficulty, levelIdx?: number | null): { rows: number; cols: number } {
+  let baseRows = 17;
+  let baseCols = 17;
+
   switch (difficulty) {
     case 'easy':
-      return { rows: 9, cols: 9 };
+      baseRows = 17;
+      baseCols = 17;
+      break;
     case 'medium':
-      return { rows: 15, cols: 15 };
+      baseRows = 25;
+      baseCols = 25;
+      break;
     case 'hard':
-      return { rows: 21, cols: 21 };
+      baseRows = 33;
+      baseCols = 33;
+      break;
     case 'extreme':
-      return { rows: 29, cols: 29 };
+      baseRows = 43;
+      baseCols = 43;
+      break;
     default:
-      return { rows: 15, cols: 15 };
+      baseRows = 21;
+      baseCols = 21;
   }
+
+  if (levelIdx && levelIdx > 1) {
+    // Add 2 extra rows/cols for every 5 levels up to +18 max size increment
+    const levelBonus = Math.min(18, Math.floor((levelIdx - 1) / 5) * 2);
+    baseRows += levelBonus;
+    baseCols += levelBonus;
+  }
+
+  // Ensure odd dimensions for clean maze generation symmetry
+  if (baseRows % 2 === 0) baseRows += 1;
+  if (baseCols % 2 === 0) baseCols += 1;
+
+  return { rows: baseRows, cols: baseCols };
 }
 
 export function createEmptyGrid(rows: number, cols: number): Cell[][] {

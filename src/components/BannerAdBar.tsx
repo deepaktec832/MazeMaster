@@ -11,14 +11,14 @@ export const BannerAdBar: React.FC<BannerAdBarProps> = ({ onWatchAdClick }) => {
     let mounted = true;
     const timer = setTimeout(() => {
       if (mounted) {
-        showAdMobBanner();
+        showAdMobBanner().catch(() => {});
       }
-    }, 1000);
+    }, 1200);
 
     return () => {
       mounted = false;
       clearTimeout(timer);
-      hideAdMobBanner();
+      hideAdMobBanner().catch(() => {});
     };
   }, []);
 

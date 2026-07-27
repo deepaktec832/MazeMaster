@@ -83,7 +83,7 @@ export const MiniMapRadar: React.FC<MiniMapRadarProps> = ({
             ctx.arc(ix, iz, 3.5, 0, Math.PI * 2);
             ctx.fill();
             ctx.shadowBlur = 0;
-          } else if (keyId === 'portal_exit') {
+          } else if (keyId === 'portal_exit' || keyId.startsWith('exit_')) {
             // Cyan Exit Portal / Goal
             ctx.fillStyle = '#06b6d4';
             ctx.shadowColor = '#06b6d4';
